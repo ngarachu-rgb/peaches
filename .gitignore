@@ -1,0 +1,34 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+
+# Local logs / temp
+*.log
+*.tmp
+*.temp
+
+# Node / package manager
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build / coverage
+dist/
+build/
+coverage/
+.vercel/
+
+# Local env files
+.env
+.env.*
+!.env.example
+
+# Python cache (in case utility scripts are used)
+__pycache__/
+*.pyc
+

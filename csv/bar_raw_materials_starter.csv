@@ -1,0 +1,20 @@
+item_code,name,buy_unit,store_unit,conversion_factor,price,restaurant_id
+BAR-TUSKER,Tusker Bottle,Crate,Bottle,24,0,16733ca1-018f-4d29-8502-909e4b23b6ec
+BAR-WCAP,White Cap Bottle,Crate,Bottle,24,0,16733ca1-018f-4d29-8502-909e4b23b6ec
+BAR-GUIN,Guinness Can,Case,Can,24,0,16733ca1-018f-4d29-8502-909e4b23b6ec
+BAR-SMIR,Smirnoff Ice Bottle,Crate,Bottle,24,0,16733ca1-018f-4d29-8502-909e4b23b6ec
+BAR-SODA,Soda Bottle,Crate,Bottle,24,0,16733ca1-018f-4d29-8502-909e4b23b6ec
+BAR-WATR,Water Bottle,Pack,Bottle,24,0,16733ca1-018f-4d29-8502-909e4b23b6ec
+BAR-TONC,Tonic Water Bottle,Crate,Bottle,24,0,16733ca1-018f-4d29-8502-909e4b23b6ec
+BAR-RDBL,Red Bull Can,Tray,Can,24,0,16733ca1-018f-4d29-8502-909e4b23b6ec
+BAR-VODK,Vodka,Bottle,ML,750,0,16733ca1-018f-4d29-8502-909e4b23b6ec
+BAR-GIN,Gin,Bottle,ML,750,0,16733ca1-018f-4d29-8502-909e4b23b6ec
+BAR-WHSK,Whisky,Bottle,ML,750,0,16733ca1-018f-4d29-8502-909e4b23b6ec
+BAR-TEQ,Tequila,Bottle,ML,750,0,16733ca1-018f-4d29-8502-909e4b23b6ec
+BAR-RUM,Rum,Bottle,ML,750,0,16733ca1-018f-4d29-8502-909e4b23b6ec
+BAR-BRAN,Brandy,Bottle,ML,750,0,16733ca1-018f-4d29-8502-909e4b23b6ec
+BAR-COKE,Coke,Crate,Bottle,24,0,16733ca1-018f-4d29-8502-909e4b23b6ec
+BAR-OJ,Orange Juice,Bottle,ML,1000,0,16733ca1-018f-4d29-8502-909e4b23b6ec
+BAR-SYRP,Sugar Syrup,Bottle,ML,750,0,16733ca1-018f-4d29-8502-909e4b23b6ec
+BAR-LEMN,Lemon,Dozen,Piece,12,0,16733ca1-018f-4d29-8502-909e4b23b6ec
+BAR-ICE,Ice,Bag,Scoop,20,0,16733ca1-018f-4d29-8502-909e4b23b6ec

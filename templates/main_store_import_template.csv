@@ -1,0 +1,4 @@
+name,buy_unit,store_unit,conversion_factor,price,restaurant_id
+Flour,Bale,Kg,12,1740,REPLACE_WITH_RESTAURANT_ID
+Sugar,Bag,Kg,50,6800,REPLACE_WITH_RESTAURANT_ID
+Cooking Oil,Jerrican,Litre,20,5200,REPLACE_WITH_RESTAURANT_ID

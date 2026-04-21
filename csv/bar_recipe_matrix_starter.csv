@@ -1,0 +1,29 @@
+finished_item_name,material_name,qty_per_unit,notes
+Vodka Bottle,Vodka,750,Full bottle sale in ML
+Gin Bottle,Gin,750,Full bottle sale in ML
+Whisky Bottle,Whisky,750,Full bottle sale in ML
+Tequila Bottle,Tequila,750,Full bottle sale in ML
+Brandy Bottle,Brandy,750,Full bottle sale in ML
+Vodka Shot,Vodka,25,Shot measure in ML
+Gin Shot,Gin,25,Shot measure in ML
+Whisky Shot,Whisky,25,Shot measure in ML
+Tequila Shot,Tequila,25,Shot measure in ML
+Vodka Double,Vodka,50,Double measure in ML
+Gin Double,Gin,50,Double measure in ML
+Whisky Double,Whisky,50,Double measure in ML
+Tequila Double,Tequila,50,Double measure in ML
+Brandy Glass,Brandy,50,Starting serving measure in ML
+Whisky Glass,Whisky,50,Starting serving measure in ML
+Gin Glass,Gin,50,Starting serving measure in ML
+Vodka Glass,Vodka,50,Starting serving measure in ML
+Gin Tonic,Gin,50,Spirit component in ML
+Gin Tonic,Tonic Water Bottle,1,One bottle per serve
+Gin Tonic,Lemon,0.25,Quarter lemon
+Gin Tonic,Ice,1,One scoop
+Vodka Soda,Vodka,50,Spirit component in ML
+Vodka Soda,Soda Bottle,1,One bottle per serve
+Vodka Soda,Lemon,0.25,Quarter lemon
+Vodka Soda,Ice,1,One scoop
+Rum Coke,Rum,50,Spirit component in ML
+Rum Coke,Coke,1,One bottle per serve
+Rum Coke,Ice,1,One scoop
