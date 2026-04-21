@@ -98,6 +98,7 @@
 
 <nav id="sidebar" class="hidden">
     <h2>MIEUX RESTAURANT ERP</h2>
+    <button id="logoutBtn" onclick="handleLogout()" style="color: #e74c3c; border-bottom: 1px solid #435a6f; margin-bottom: 12px;">Logout</button>
     <div id="branchSwitcherWrap" class="hidden" style="padding: 0 20px 18px 20px; border-bottom: 1px solid #435a6f; margin-bottom: 12px;">
         <div style="font-size: 11px; color: #9fb3c8; text-transform: uppercase; margin-bottom: 6px;">Branch Scope</div>
         <div id="branchScopeLabel" style="font-size: 13px; font-weight: 700; color: white; margin-bottom: 8px;">--</div>
@@ -114,7 +115,6 @@
     <button id="navMatrix" onclick="showPage('matrixPage')">Inventory Matrix</button>
     <button id="navStaff" onclick="showPage('staffPage')" class="hidden">Staff Management</button>
     <button id="navAccount" onclick="showPage('accountPage')">My Account</button>
-    <button onclick="handleLogout()" style="margin-top:auto; color: #e74c3c;">Logout</button>
 </nav>
 
 <main>
