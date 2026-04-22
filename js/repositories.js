@@ -144,6 +144,12 @@ function attachBranchPayload(tableName, context, payload) {
     return payload;
 }
 
+function isMissingColumnError(error, columnName) {
+    if (!error) return false;
+    const message = String(error.message || '').toLowerCase();
+    return message.includes('column') && message.includes(String(columnName || '').toLowerCase()) && message.includes('does not exist');
+}
+
 async function fetchFirstRow(query) {
     const { data, error } = await query.limit(1);
     if (error) {
@@ -555,7 +561,21 @@ export function createRepositories(supabase) {
                 .eq('id', shiftId);
         },
 
-        getProducts(context) {
+        async getProducts(context) {
+            const activeOnlyResult = await applyScope(
+                supabase
+                    .from('inventory')
+                    .select(selectColumns('inventory', 'id, restaurant_id, name, price, category, is_active'))
+                    .eq('is_active', true)
+                    .order('name', { ascending: true }),
+                'inventory',
+                context
+            );
+
+            if (!isMissingColumnError(activeOnlyResult.error, 'is_active')) {
+                return activeOnlyResult;
+            }
+
             return applyScope(
                 supabase
                     .from('inventory')
@@ -626,6 +646,17 @@ export function createRepositories(supabase) {
         deleteProduct(context, id) {
             return applyScope(
                 supabase.from('inventory').delete().eq('id', id),
+                'inventory',
+                context
+            );
+        },
+
+        deactivateProduct(context, id) {
+            return applyScope(
+                supabase
+                    .from('inventory')
+                    .update({ is_active: false })
+                    .eq('id', id),
                 'inventory',
                 context
             );

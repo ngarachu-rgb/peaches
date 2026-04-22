@@ -1645,7 +1645,7 @@ function renderFinishedProducts() {
             <td style="text-align: right;">
                 ${canManageProducts ? `
                     <button class="btn" style="background:#edf2f7; margin-right:8px;" onclick="editSellingProduct('${item.product_id}')">Edit</button>
-                    <button class="btn" style="background:#e74c3c; color:white;" onclick="deleteSellingProduct('${item.product_id}')">Delete</button>
+                    <button class="btn" style="background:#e74c3c; color:white;" onclick="deleteSellingProduct('${item.product_id}')">Deactivate</button>
                 ` : '--'}
             </td>
         </tr>
@@ -2850,18 +2850,17 @@ window.saveSellingProduct = async () => {
 };
 
 window.deleteSellingProduct = async (id) => {
-    if (!confirm('Are you sure you want to delete this product? This will remove it from the sales sheet.')) return;
+    if (!confirm('Are you sure you want to deactivate this product? It will be removed from daily use but kept in history.')) return;
     try {
         requirePermission(PERMISSIONS.MANAGE_PRODUCTS);
         const scope = getScope();
-        const { error: deleteError } = await repositories.deleteProduct(scope, id);
-        if (deleteError) throw deleteError;
-        const { error: shiftInventoryError } = await repositories.deleteShiftInventoryByProduct(scope, id);
-        if (shiftInventoryError) throw shiftInventoryError;
-        alert('Product deleted successfully.');
+        const { error } = await repositories.deactivateProduct(scope, id);
+        if (error) throw error;
+        alert('Product deactivated successfully.');
         await loadInventory();
+        updateDropdowns();
     } catch (error) {
-        handleError(error, 'Failed to delete product');
+        handleError(error, 'Failed to deactivate product');
     }
 };
 
