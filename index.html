@@ -7,7 +7,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
-        :root { --primary: #a4933e; --bg: #f4f7f6; --sidebar: #30557a; --white: #ffffff; --danger: #e74c3c; --success: #2ecc71; }
+        :root { --primary: #7b7761; --bg: #f4f7f6; --sidebar: #30557a; --white: #ffffff; --danger: #e74c3c; --success: #2ecc71; }
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; display: flex; height: 100vh; background: var(--bg); overflow: hidden; }
         nav { width: 220px; background: var(--sidebar); color: white; display: flex; flex-direction: column; padding: 20px 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
         nav h2 { text-align: center; font-size: 1.2em; margin-bottom: 30px; border-bottom: 1px solid #435a6f; padding-bottom: 10px; }
@@ -66,7 +66,7 @@
             #salesTable thead th {
                 position: sticky;
                 top: 0;
-                background: #f8f9fa;
+                background: #2b8ef2;
                 z-index: 10;
             }           
 
@@ -89,7 +89,7 @@
 
 <div id="loginPage">
     <div class="card" style="width: 300px; text-align: center;">
-        <h3>ERP LOGIN</h3>
+        <h3>MIEUX ERP LOGIN</h3>
         <input type="text" id="loginUsername" name="loginUsername" placeholder="Username or Email" style="margin-bottom:10px">
         <input type="password" id="loginPass" placeholder="Password" style="margin-bottom:20px">
         <button class="btn btn-primary" onclick="handleLogin()" style="width:100%">Enter System</button>
@@ -125,34 +125,33 @@
 <main>
 <div id="salesPage" class="page active">
     <div class="card">
-
-        <div style="display:flex; gap:15px; flex-wrap:wrap; margin-bottom:10px;">
+        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                <h2 style="font-size: 1em; font-weight: bold;">Daily Sales Reporting</h2>
+                <h2 style="font-size: 1em; font-weight: bold;">Daily Sales</h2>
             </div>
-            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:1px; padding:4px 8px; min-width:180px;">
-                <div style="font-size:12px; color:#64748b; text-transform:uppercase;">Date</div>
+            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:1px; padding:2px 4px; min-width:100px;">
+                <div style="font-size: 1em; color:#64748b; text-transform:uppercase;">Date</div>
                 <div id="salesCurrentDate" style="font-size:16px; font-weight:700; color:#2c3e50;">--</div>
             </div>
             <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px 16px; min-width:180px;">
-                <div style="font-size:12px; color:#64748b; text-transform:uppercase;">Current Shift</div>
+                <div style="font-size: 1em; color:#64748b; text-transform:uppercase;">Current Shift</div>
                 <div id="salesCurrentShift" style="font-size:16px; font-weight:700; color:#2c3e50;">--</div>
             </div>
              </div>
-                        <div style="width: 200px;">
-                    <input type="text" id="salesSearch" placeholder="beef" oninput="filterSales()" 
+                        <div style="width: 100px;">
+                    <input type="text" id="salesSearch" placeholder="SEARCH ITEM" oninput="filterSales()" 
                         style="border-radius: 20px; padding: 10px 20px; border: 1px solid #7092ae;">
             </div>
         
         <table id="salesTable" style="display: table; border: none;">
             <thead>
-                <tr style="border-bottom: 1px solid #eee;">
-                    <th id="salesHeaderItem" style="color: #7092ae; background: none;">Item</th>
-                    <th id="salesHeaderOpening" style="color: #7092ae; background: none;">Opening</th>
-                    <th id="salesHeaderAdded" style="color: #7092ae; background: none;">Added</th>
-                    <th id="salesHeaderClosing" style="color: #7092ae; background: none;">Closing</th>
-                    <th id="salesHeaderSold" style="color: #7092ae; background: none;">Sold</th>
-                    <th id="salesHeaderTotal" style="color: #7092ae; background: none;">Total</th>
+                <tr style="border-bottom: 1px solid #251818a6;">
+                    <th id="salesHeaderItem" style="color: #e6eaed; background: none;">Item</th>
+                    <th id="salesHeaderOpening" style="color: #e6eaed; background: none;">Opening</th>
+                    <th id="salesHeaderAdded" style="color:  #e6eaed; background: none;">Added</th>
+                    <th id="salesHeaderClosing" style="color: #e6eaed; background: none;">Closing</th>
+                    <th id="salesHeaderSold" style="color:  #e6eaed; background: none;">Sold</th>
+                    <th id="salesHeaderTotal" style="color: #e6eaed; background: none;">Total</th>
                 </tr>
             </thead>
             <tbody id="salesBody">
