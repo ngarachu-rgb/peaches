@@ -144,12 +144,6 @@ function attachBranchPayload(tableName, context, payload) {
     return payload;
 }
 
-function isMissingColumnError(error, columnName) {
-    if (!error) return false;
-    const message = String(error.message || '').toLowerCase();
-    return message.includes('column') && message.includes(String(columnName || '').toLowerCase()) && message.includes('does not exist');
-}
-
 async function fetchFirstRow(query) {
     const { data, error } = await query.limit(1);
     if (error) {
@@ -170,11 +164,24 @@ function ensureRowId(row) {
     };
 }
 
-function isMissingColumnError(error, tableName, columnName) {
+function isMissingColumnError(error, tableNameOrColumnName, columnName = '') {
+    if (!error) return false;
     const message = String(error?.message || '').toLowerCase();
+
+    if (!columnName) {
+        return (
+            message.includes('column') &&
+            message.includes(String(tableNameOrColumnName || '').toLowerCase()) &&
+            message.includes('does not exist')
+        );
+    }
+
+    const tableName = String(tableNameOrColumnName || '').toLowerCase();
+    const targetColumn = String(columnName || '').toLowerCase();
+
     return (
-        (message.includes(`column ${tableName}.${columnName}`) && message.includes('does not exist')) ||
-        (message.includes(`could not find the '${columnName}' column of '${tableName}'`) && message.includes('schema cache'))
+        (message.includes(`column ${tableName}.${targetColumn}`) && message.includes('does not exist')) ||
+        (message.includes(`could not find the '${targetColumn}' column of '${tableName}'`) && message.includes('schema cache'))
     );
 }
 
