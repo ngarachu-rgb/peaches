@@ -1830,6 +1830,24 @@ function getCurrentBranchName() {
     return getBranchName(currentBranchId) || currentBranchId || '--';
 }
 
+function getScopeForBranch(branchId = '') {
+    const scope = getScope();
+    if (!branchId) return scope;
+    return {
+        ...scope,
+        branchId,
+        useBranchScope: true
+    };
+}
+
+function isDirectSalesBranch(branchId = '') {
+    const branch = (state.branches || []).find((entry) => String(entry.id) === String(branchId));
+    if (!branch) return false;
+    const operatingMode = String(branch.operating_mode || '').trim().toUpperCase();
+    const code = String(branch.code || '').trim().toUpperCase();
+    return operatingMode === 'DIRECT_SALES' || code.includes('BAR');
+}
+
 function formatShiftRecallDate(value) {
     if (!value) return '--';
     return new Date(value).toLocaleDateString();
@@ -1878,8 +1896,17 @@ function buildShiftRecallSummaryCards(shift, shiftLabel) {
     `;
 }
 
-function buildShiftRecallRows(shiftInventoryRows, products) {
+function buildShiftRecallRows(shiftInventoryRows, products, options = {}) {
     const productMap = new Map((products || []).map((product) => [String(product.id), product]));
+    const previousInventoryMap = new Map((options.previousInventoryRows || []).map((row) => [String(row.product_id), row]));
+    const nextInventoryMap = new Map((options.nextInventoryRows || []).map((row) => [String(row.product_id), row]));
+    const measuredIssueMap = (options.barIssueRows || []).reduce((map, issue) => {
+        const key = String(issue.target_product_name || '').trim().toLowerCase();
+        if (!key) return map;
+        map.set(key, (map.get(key) || 0) + toNumber(issue.qty_added_target));
+        return map;
+    }, new Map());
+    const useDirectSalesFallback = options.useDirectSalesFallback === true;
 
     return (shiftInventoryRows || [])
         .map((row) => {
@@ -1887,12 +1914,28 @@ function buildShiftRecallRows(shiftInventoryRows, products) {
             const productName = product?.name || `Unknown Product (${String(row.product_id || '').slice(0, 8)})`;
             const displayName = getDisplayProductName(productName);
             const price = toNumber(product?.price);
+            let opening = toNumber(row.bbf);
+            let added = toNumber(row.added_today);
+            let closing = toNumber(row.close_qty);
             const soldQty = toNumber(row.sold_qty);
+
+            if (useDirectSalesFallback) {
+                if (opening === 0) {
+                    opening = toNumber(previousInventoryMap.get(String(row.product_id))?.close_qty);
+                }
+                if (closing === 0) {
+                    closing = toNumber(nextInventoryMap.get(String(row.product_id))?.bbf);
+                }
+                if (added === 0) {
+                    added = toNumber(measuredIssueMap.get(String(productName || '').trim().toLowerCase()));
+                }
+            }
+
             return {
                 item: displayName,
-                opening: toNumber(row.bbf),
-                added: toNumber(row.added_today),
-                closing: toNumber(row.close_qty),
+                opening,
+                added,
+                closing,
                 sold: soldQty,
                 price,
                 total: soldQty * price
@@ -4209,17 +4252,57 @@ window.viewShiftDetail = async (shiftId) => {
     detailContent.innerHTML = '<p style="text-align:center;">Loading shift recall...</p>';
 
     try {
-        const [{ data: shift, error }, shiftInventoryResult, productsResult] = await Promise.all([
-            repositories.getShiftById(getScope(), shiftId),
-            repositories.getShiftInventory(getScope(), shiftId),
-            repositories.getProducts(getScope(), { includeInactive: true })
+        const baseScope = getScope();
+        const [{ data: shift, error }, productsResult] = await Promise.all([
+            repositories.getShiftById(baseScope, shiftId),
+            repositories.getProducts(baseScope, { includeInactive: true })
         ]);
         if (error) throw error;
-        if (shiftInventoryResult.error) throw shiftInventoryResult.error;
         if (productsResult.error) throw productsResult.error;
 
+        const shiftScope = getScopeForBranch(shift.branch_id);
+        const shiftDate = new Date(shift.created_at);
+        const windowStart = new Date(shiftDate);
+        windowStart.setDate(windowStart.getDate() - 7);
+        const windowEnd = new Date(shiftDate);
+        windowEnd.setDate(windowEnd.getDate() + 7);
+
+        const [shiftInventoryResult, nearbyShiftsResult, barIssuesResult] = await Promise.all([
+            repositories.getShiftInventory(shiftScope, shiftId),
+            repositories.getShiftReportsByRange(shiftScope, toDateOnly(windowStart), toDateOnly(windowEnd)),
+            isDirectSalesBranch(shift.branch_id)
+                ? repositories.getBarStockIssues(shiftScope)
+                : Promise.resolve({ data: [], error: null })
+        ]);
+        if (shiftInventoryResult.error) throw shiftInventoryResult.error;
+        if (nearbyShiftsResult.error) throw nearbyShiftsResult.error;
+        if (barIssuesResult.error) throw barIssuesResult.error;
+
+        const sameBranchShifts = annotateShiftsForDisplay(
+            (nearbyShiftsResult.data || []).filter((row) => String(row.branch_id || '') === String(shift.branch_id || '')),
+            state.shiftSystem
+        ).sort((left, right) => new Date(left.created_at) - new Date(right.created_at));
+
+        const selectedIndex = sameBranchShifts.findIndex((row) => String(row.id) === String(shift.id));
+        const previousShift = selectedIndex > 0 ? sameBranchShifts[selectedIndex - 1] : null;
+        const nextShift = selectedIndex !== -1 && selectedIndex < sameBranchShifts.length - 1 ? sameBranchShifts[selectedIndex + 1] : null;
+
+        const adjacentShiftIds = [previousShift?.id, nextShift?.id].filter(Boolean);
+        const adjacentInventoryResult = adjacentShiftIds.length
+            ? await repositories.getShiftInventoryForShiftIds(shiftScope, adjacentShiftIds)
+            : { data: [], error: null };
+        if (adjacentInventoryResult.error) throw adjacentInventoryResult.error;
+
+        const previousInventoryRows = (adjacentInventoryResult.data || []).filter((row) => String(row.shift_id) === String(previousShift?.id || ''));
+        const nextInventoryRows = (adjacentInventoryResult.data || []).filter((row) => String(row.shift_id) === String(nextShift?.id || ''));
+
         const shiftLabel = annotateShiftsForDisplay([shift], state.shiftSystem)?.[0]?.shiftLabel || '--';
-        const recallRows = buildShiftRecallRows(shiftInventoryResult.data || [], productsResult.data || []);
+        const recallRows = buildShiftRecallRows(shiftInventoryResult.data || [], productsResult.data || [], {
+            useDirectSalesFallback: isDirectSalesBranch(shift.branch_id),
+            previousInventoryRows,
+            nextInventoryRows,
+            barIssueRows: (barIssuesResult.data || []).filter((row) => String(row.shift_id || '') === String(shift.id))
+        });
 
         detailContent.innerHTML = `
             <div style="background:white; padding:20px; border-radius:8px; border:1px solid #e2e8f0; box-shadow:0 2px 4px rgba(0,0,0,0.05);">
