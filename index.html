@@ -926,6 +926,7 @@
             <h2 id="reportsPageTitle" style="color: #2c3e50; margin-top: 0; text-transform: uppercase; letter-spacing: 1px;">Shift Reports</h2>
             <div style="display:flex; gap:10px; margin-bottom:18px; flex-wrap:wrap;">
                 <button id="btnShiftReports" class="btn" onclick="switchReportView('shift-reports')" style="background:#7092ae; color:white;">Shift Reports</button>
+                <button id="btnShiftRecall" class="btn" onclick="switchReportView('shift-recall')" style="background:#edf2f7; color:#2d3748;">Shift Recall</button>
                 <button id="btnFinancialReports" class="btn" onclick="switchReportView('financial-reports')" style="background:#edf2f7; color:#2d3748;">Financial Reports</button>
             </div>
               <div style="display: flex; gap: 15px; align-items: flex-end; flex-wrap:wrap;">
@@ -948,7 +949,7 @@
         </div>
 
         <div id="shiftReportsSection">
-        <div style="background:#eff6ff; border:1px solid #bfdbfe; color:#1d4ed8; padding:10px 14px; border-radius:8px; margin-bottom:12px; font-size:13px;">
+        <div id="shiftRecallHelper" style="background:#eff6ff; border:1px solid #bfdbfe; color:#1d4ed8; padding:10px 14px; border-radius:8px; margin-bottom:12px; font-size:13px;">
             Use the <strong>Shift Recall</strong> button in the <strong>Action</strong> column to open a full read-only shift detail view.
         </div>
         <div id="shiftTableContainer" style="background:white; border-radius:8px; overflow-x:auto; box-shadow:0 2px 5px rgba(0,0,0,0.05);">

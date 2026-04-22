@@ -4095,33 +4095,49 @@ window.deleteRawMaterial = async (id) => {
 };
 
 window.switchReportView = (view) => {
-    const isShift = view === 'shift-reports';
-    if (!isShift && !hasPermission(state.permissions, PERMISSIONS.VIEW_FINANCIAL_REPORTS)) {
+    const isShiftReports = view === 'shift-reports';
+    const isShiftRecall = view === 'shift-recall';
+    const isShiftMode = isShiftReports || isShiftRecall;
+    if (!isShiftMode && !hasPermission(state.permissions, PERMISSIONS.VIEW_FINANCIAL_REPORTS)) {
         handleError(new Error('You do not have access to financial reports.'), 'Access denied');
         return;
     }
     const shiftButton = document.getElementById('btnShiftReports');
+    const shiftRecallButton = document.getElementById('btnShiftRecall');
     const financialButton = document.getElementById('btnFinancialReports');
     const shiftSection = document.getElementById('shiftReportsSection');
     const financialSection = document.getElementById('financialReportsSection');
     const pageTitle = document.getElementById('reportsPageTitle');
+    const shiftRecallHelper = document.getElementById('shiftRecallHelper');
 
     if (shiftButton) {
-        shiftButton.style.background = isShift ? '#7092ae' : '#edf2f7';
-        shiftButton.style.color = isShift ? 'white' : '#2d3748';
+        shiftButton.style.background = isShiftReports ? '#7092ae' : '#edf2f7';
+        shiftButton.style.color = isShiftReports ? 'white' : '#2d3748';
+    }
+
+    if (shiftRecallButton) {
+        shiftRecallButton.style.background = isShiftRecall ? '#7092ae' : '#edf2f7';
+        shiftRecallButton.style.color = isShiftRecall ? 'white' : '#2d3748';
     }
 
     if (financialButton) {
-        financialButton.style.background = isShift ? '#edf2f7' : '#7092ae';
-        financialButton.style.color = isShift ? '#2d3748' : 'white';
+        financialButton.style.background = isShiftMode ? '#edf2f7' : '#7092ae';
+        financialButton.style.color = isShiftMode ? '#2d3748' : 'white';
     }
 
-    if (shiftSection) shiftSection.style.display = isShift ? 'block' : 'none';
-    if (financialSection) financialSection.style.display = isShift ? 'none' : 'block';
-    if (pageTitle) pageTitle.innerText = isShift ? 'Shift Reports' : 'Financial Reports';
+    if (shiftSection) shiftSection.style.display = isShiftMode ? 'block' : 'none';
+    if (financialSection) financialSection.style.display = isShiftMode ? 'none' : 'block';
+    if (shiftRecallHelper) shiftRecallHelper.style.display = isShiftRecall ? 'block' : 'none';
+    if (pageTitle) {
+        pageTitle.innerText = isShiftReports
+            ? 'Shift Reports'
+            : isShiftRecall
+                ? 'Shift Recall'
+                : 'Financial Reports';
+    }
     updatePageBranchLabels();
 
-    if (isShift) {
+    if (isShiftMode) {
         window.loadShiftReport();
     }
 };
