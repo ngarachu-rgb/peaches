@@ -513,6 +513,15 @@ function populateAccountPage() {
     if (role) role.innerText = prettifyRole(state.role);
 }
 
+function updateSidebarUserSummary() {
+    const nameNode = document.getElementById('sidebarUserName');
+    const roleNode = document.getElementById('sidebarUserRole');
+    if (!nameNode || !roleNode) return;
+
+    nameNode.innerText = getProfileDisplayName(state.user);
+    roleNode.innerText = prettifyRole(state.role || '--');
+}
+
 function updatePageBranchLabels() {
     const branchName = getCurrentBranchName();
     document.querySelectorAll('.page h2').forEach((heading) => {
@@ -2349,6 +2358,7 @@ async function refreshCoreData() {
 
 async function initApp() {
     await refreshCoreData();
+    updateSidebarUserSummary();
     updatePageBranchLabels();
     await window.showPage(getDefaultPage());
 }
