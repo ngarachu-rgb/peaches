@@ -1569,7 +1569,7 @@ function renderSales() {
     updateSalesTableHeaders();
 
     if (!state.items.length) {
-        body.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:30px;">No products found. Add items in Finished Products.</td></tr>';
+        body.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:30px;">No products found. Add items in Finished Products.</td></tr>';
         return;
     }
 
@@ -1617,6 +1617,7 @@ function renderSales() {
                         style="display:block; width:120px; padding:6px; border:1px solid #7092ae; border-radius:4px; margin:0;">
                 </td>
                 <td id="sold_${item.product_id}" style="font-weight:bold; text-align:left; color: #2c3e50;">${item.sold || 0}</td>
+                <td style="font-weight:600; text-align:left; color:#2c3e50;">${formatMoney(item.price || 0)}</td>
                 <td id="amt_${item.product_id}" class="row-amt" style="font-weight:bold; text-align:left;">0</td>
             </tr>
         `;
