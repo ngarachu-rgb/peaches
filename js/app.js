@@ -1582,19 +1582,19 @@ function renderSales() {
               : '';
           return `
               <tr>
-                  <td style="padding:12px; font-weight:500;">${getDisplayProductName(item.name)}</td>
+                  <td style="padding:8px 14px; font-weight:500;">${getDisplayProductName(item.name)}</td>
                   <td style="text-align:center;">
-                      <span style="display:inline-block; min-width:56px; padding:6px 10px; border-radius:999px; background:#eff6ff; color:#1d4ed8; font-weight:700;">
+                      <span style="display:inline-flex; justify-content:center; align-items:center; min-width:88px; padding:2px 0; color:#1d4ed8; font-weight:700;">
                           ${directSalesMode ? formatQuantity(item.bbf) : item.bbf}
                       </span>
-                      ${directSalesMode ? `<div style="font-size:11px; color:#64748b; margin-top:4px;">${item.available_unit_label || 'units'}</div>` : ''}
+                      ${directSalesMode ? `<div style="font-size:11px; color:#64748b; margin-top:4px; text-align:center;">${item.available_unit_label || 'units'}</div>` : ''}
                   </td>
                   <td style="text-align:center;">
                       ${directSalesMode ? `
-                          <span style="display:inline-block; min-width:56px; padding:6px 10px; border-radius:999px; background:#ecfdf5; color:#047857; font-weight:700;">
+                          <span style="display:inline-flex; justify-content:center; align-items:center; min-width:88px; padding:2px 0; color:#047857; font-weight:700;">
                               ${formatQuantity(item.added_today)}
                           </span>
-                          <div style="font-size:11px; color:#64748b; margin-top:4px;">
+                          <div style="font-size:11px; color:#64748b; margin-top:4px; text-align:center;">
                               ${item.sale_mode === 'measured'
                                   ? 'Issued to measured sales'
                                   : (toNumber(item.issued_qty) > 0
@@ -1602,12 +1602,12 @@ function renderSales() {
                                       : 'Store item')}
                           </div>
                       ` : `
-                          <span style="display:inline-block; min-width:56px; padding:6px 10px; border-radius:999px; background:#ecfdf5; color:#047857; font-weight:700;">
+                          <span style="display:inline-flex; justify-content:center; align-items:center; min-width:56px; padding:2px 0; color:#047857; font-weight:700;">
                               ${item.added_today}
                           </span>
                       `}
                   </td>
-                  <td>
+                  <td style="text-align:center;">
                       <input type="number"
                           class="sales-input"
                           placeholder="${directSalesMode ? 'Bal Qty' : 'Insert qty'}"
@@ -1622,10 +1622,10 @@ function renderSales() {
                         data-issued-qty="${directSalesMode ? toNumber(item.issued_qty) : 0}"
                         data-max-qty="${totalAvailable}"
                         value="${explicitValue}"
-                        style="width:80px; padding:6px; border:1px solid #7092ae; border-radius:4px;">
+                        style="display:block; width:120px; padding:6px; border:1px solid #7092ae; border-radius:4px; margin:0 auto;">
                 </td>
                 <td id="sold_${item.product_id}" style="font-weight:bold; text-align:center; color: #2c3e50;">${item.sold || 0}</td>
-                <td id="amt_${item.product_id}" class="row-amt" style="font-weight:bold; text-align:right; padding-right:15px;">0</td>
+                <td id="amt_${item.product_id}" class="row-amt" style="font-weight:bold; text-align:center;">0</td>
             </tr>
         `;
     }).join('');

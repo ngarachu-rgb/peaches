@@ -10,8 +10,8 @@
         :root { --primary: #7b7761; --bg: #f4f7f6; --sidebar: #30557a; --white: #ffffff; --danger: #e74c3c; --success: #2ecc71; }
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; display: flex; height: 100vh; background: var(--bg); overflow: hidden; }
         nav { width: 220px; background: var(--sidebar); color: white; display: flex; flex-direction: column; padding: 20px 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
-        nav h2 { text-align: center; font-size: 1.2em; margin-bottom: 18px; border-bottom: 1px solid #435a6f; padding-bottom: 10px; }
-        nav button { background: none; border: none; color: #bdc3c7; padding: 13px 25px; text-align: left; cursor: pointer; font-size: 14px; transition: 0.3s; }
+        nav h2 { text-align: center; font-size: 1.2em; margin-bottom: 12px; border-bottom: 1px solid #435a6f; padding-bottom: 10px; }
+        nav button { background: none; border: none; color: #bdc3c7; padding: 12px 25px; text-align: left; cursor: pointer; font-size: 14px; transition: 0.3s; }
         nav button:hover, nav button.active { background: #335a81; color: white; border-left: 4px solid var(--primary); }
         main { flex: 1; padding: 30px; overflow-y: auto; min-height: 0; }
         .hidden { display: none !important; }
@@ -70,9 +70,14 @@
             }
             #salesTable th,
             #salesTable td {
-                padding-left: 18px;
-                padding-right: 18px;
+                padding-left: 14px;
+                padding-right: 14px;
                 vertical-align: middle;
+            }
+            #salesTable td {
+                padding-top: 8px;
+                padding-bottom: 8px;
+                font-size: 14px;
             }
             #salesTable thead th {
                 position: sticky;
@@ -104,8 +109,18 @@
             #salesTable td:nth-child(6) {
                 text-align: center;
             }
+            #salesTable td:nth-child(2) > *,
+            #salesTable td:nth-child(3) > *,
+            #salesTable td:nth-child(4) > *,
+            #salesTable td:nth-child(5) > *,
+            #salesTable td:nth-child(6) > * {
+                margin-left: auto;
+                margin-right: auto;
+            }
             #salesTable td:nth-child(4) input {
-                max-width: 140px;
+                display: block;
+                width: 120px;
+                max-width: 120px;
                 margin: 0 auto;
             }           
 
@@ -137,12 +152,12 @@
 
 <nav id="sidebar" class="hidden">
     <h2 style="margin-bottom: 12px;">MIEUX RESTAURANT ERP</h2>
-    <div id="sidebarShiftSummary" style="padding: 0 20px 18px 20px; border-bottom: 1px solid #435a6f; margin-bottom: 12px;">
+    <div id="sidebarShiftSummary" style="padding: 0 20px 14px 20px; border-bottom: 1px solid #435a6f; margin-bottom: 8px;">
         <div id="sidebarShiftBranch" style="font-size: 14px; font-weight: 700; color: white; margin-bottom: 4px;">--</div>
         <div id="sidebarShiftDate" style="font-size: 12px; color: #dbe7f3; margin-bottom: 4px;">--</div>
         <div id="sidebarShiftMeta" style="font-size: 12px; color: #9fb3c8; text-transform: uppercase;">--</div>
     </div>
-    <button id="logoutBtn" onclick="handleLogout()" style="color: #e74c3c; font-weight: 700; border-bottom: 1px solid #435a6f; margin-bottom: 8px;">Logout</button>
+    <button id="logoutBtn" onclick="handleLogout()" style="color: #e74c3c; font-weight: 800; border-bottom: 1px solid #435a6f; margin-bottom: 4px;">Logout</button>
     <div id="branchSwitcherWrap" class="hidden" style="padding: 0 20px 12px 20px; border-bottom: 1px solid #435a6f; margin-bottom: 8px;">
         <select id="branchSwitcher" name="branchSwitcher" onchange="switchBranchContext(this.value)" style="background: #f8fafc; color: #1f2937; border: 1px solid #cbd5e0;">
             <option value="">Select branch</option>
