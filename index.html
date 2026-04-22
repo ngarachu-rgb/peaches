@@ -13,7 +13,7 @@
         nav h2 { text-align: center; font-size: 1.2em; margin-bottom: 12px; border-bottom: 1px solid #435a6f; padding-bottom: 10px; }
         nav button { background: none; border: none; color: #bdc3c7; padding: 12px 25px; text-align: left; cursor: pointer; font-size: 14px; transition: 0.3s; }
         nav button:hover, nav button.active { background: #335a81; color: white; border-left: 4px solid var(--primary); }
-        main { flex: 1; padding: 30px; overflow-y: auto; min-height: 0; }
+        main { flex: 1; padding: 30px; overflow-y: auto; min-height: 0; position: relative; }
         .hidden { display: none !important; }
         .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 20px; }
         table { width: 100%; border-collapse: collapse; margin-top: 10px; background: white; }
@@ -130,6 +130,11 @@
                 flex-wrap: wrap;
                 gap: 8px;
             }
+            #appCornerLogo {
+                width: 76px !important;
+                top: 14px !important;
+                right: 16px !important;
+            }
         }
 
 </style>
@@ -175,6 +180,13 @@
 </nav>
 
 <main>
+<div id="appCornerLogo" aria-hidden="true" style="position: fixed; top: 18px; right: 28px; width: 118px; z-index: 80; pointer-events: none; opacity: 0.96;">
+    <svg viewBox="0 0 260 150" role="img" aria-label="MP logo" style="width:100%; height:auto; display:block;">
+        <path d="M27 22h37l57 67 57-67h86c18 0 34 7 46 19 12 12 18 28 18 46s-6 34-18 46c-12 12-28 19-46 19h-38v-34h38c9 0 17-3 23-9s9-14 9-22-3-16-9-22-14-9-23-9h-71l-71 84-71-84v106H27z" fill="#151515"/>
+        <path d="M132 150h-55l55-63z" fill="#be9450"/>
+        <path d="M157 66h36c17 0 31 14 31 31s-14 31-31 31h-36z" fill="#ffffff"/>
+    </svg>
+</div>
 <div id="salesPage" class="page active">
     <div class="card">
         <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px;">
