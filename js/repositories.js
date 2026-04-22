@@ -568,12 +568,14 @@ export function createRepositories(supabase) {
                 .eq('id', shiftId);
         },
 
-        async getProducts(context) {
+        async getProducts(context, options = {}) {
+            const includeInactive = options.includeInactive === true;
+
             const activeOnlyResult = await applyScope(
                 supabase
                     .from('inventory')
                     .select(selectColumns('inventory', 'id, restaurant_id, name, price, category, is_active'))
-                    .eq('is_active', true)
+                    .match(includeInactive ? {} : { is_active: true })
                     .order('name', { ascending: true }),
                 'inventory',
                 context

@@ -1830,6 +1830,125 @@ function getCurrentBranchName() {
     return getBranchName(currentBranchId) || currentBranchId || '--';
 }
 
+function formatShiftRecallDate(value) {
+    if (!value) return '--';
+    return new Date(value).toLocaleDateString();
+}
+
+function formatShiftRecallDateTime(value) {
+    if (!value) return '--';
+    return new Date(value).toLocaleString();
+}
+
+function buildShiftRecallSummaryCards(shift, shiftLabel) {
+    const mpesaIncome = calculateMpesaIncome(shift.mpesa_float, shift.mpesa_closing, shift.mpesa_withdrawals);
+    const accountedIncome = calculateAccountedIncome({
+        cashAtHand: shift.cash_at_hand,
+        mpesaIncome,
+        totalExpenses: shift.total_expenses,
+        debtGiven: shift.total_debts,
+        prevDebtsPaid: shift.debts_collected
+    });
+    const variance = calculateVariance(shift.total_sales, accountedIncome);
+
+    const summaryItems = [
+        { label: 'Branch', value: getBranchName(shift.branch_id) || '--' },
+        { label: 'Business Date', value: formatShiftRecallDate(shift.created_at) },
+        { label: 'Shift', value: shiftLabel || '--' },
+        { label: 'Closed By', value: shift.closed_by || 'Staff' },
+        { label: 'Total Sales', value: `KES ${formatMoney(shift.total_sales)}` },
+        { label: 'M-Pesa Income', value: `KES ${formatMoney(mpesaIncome)}` },
+        { label: 'Cash at Hand', value: `KES ${formatMoney(shift.cash_at_hand)}` },
+        { label: 'Expenses', value: `KES ${formatMoney(shift.total_expenses)}` },
+        { label: 'Debt Given', value: `KES ${formatMoney(shift.total_debts)}` },
+        { label: 'Debt Paid', value: `KES ${formatMoney(shift.debts_collected)}` },
+        { label: 'Variance', value: `KES ${formatMoney(variance)}` },
+        { label: 'Recorded At', value: formatShiftRecallDateTime(shift.created_at) }
+    ];
+
+    return `
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:12px; margin-bottom:20px;">
+            ${summaryItems.map((item) => `
+                <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:12px 14px;">
+                    <div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:6px;">${item.label}</div>
+                    <div style="font-size:15px; font-weight:700; color:#1f2937;">${item.value}</div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+function buildShiftRecallRows(shiftInventoryRows, products) {
+    const productMap = new Map((products || []).map((product) => [String(product.id), product]));
+
+    return (shiftInventoryRows || [])
+        .map((row) => {
+            const product = productMap.get(String(row.product_id));
+            const productName = product?.name || `Unknown Product (${String(row.product_id || '').slice(0, 8)})`;
+            const displayName = getDisplayProductName(productName);
+            const price = toNumber(product?.price);
+            const soldQty = toNumber(row.sold_qty);
+            return {
+                item: displayName,
+                opening: toNumber(row.bbf),
+                added: toNumber(row.added_today),
+                closing: toNumber(row.close_qty),
+                sold: soldQty,
+                price,
+                total: soldQty * price
+            };
+        })
+        .sort((left, right) => left.item.localeCompare(right.item));
+}
+
+function renderShiftRecallTable(rows) {
+    if (!rows.length) {
+        return '<div style="padding:20px; color:#64748b; text-align:center; border:1px solid #e2e8f0; border-radius:10px;">No item rows were found for this shift.</div>';
+    }
+
+    const totalSales = rows.reduce((sum, row) => sum + toNumber(row.total), 0);
+
+    return `
+        <div style="overflow-x:auto;">
+            <table style="width:100%; border-collapse:collapse; background:white; border:1px solid #e2e8f0; border-radius:10px; overflow:hidden;">
+                <thead>
+                    <tr style="background:#274766; color:white;">
+                        <th style="padding:12px 14px; text-align:left;">Item</th>
+                        <th style="padding:12px 14px; text-align:right;">Opening</th>
+                        <th style="padding:12px 14px; text-align:right;">Added</th>
+                        <th style="padding:12px 14px; text-align:right;">Closing</th>
+                        <th style="padding:12px 14px; text-align:right;">Sold</th>
+                        <th style="padding:12px 14px; text-align:right;">Price</th>
+                        <th style="padding:12px 14px; text-align:right;">Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rows.map((row) => `
+                        <tr style="border-bottom:1px solid #e5e7eb;">
+                            <td style="padding:10px 14px; font-weight:600;">${row.item}</td>
+                            <td style="padding:10px 14px; text-align:right;">${formatQuantity(row.opening)}</td>
+                            <td style="padding:10px 14px; text-align:right;">${formatQuantity(row.added)}</td>
+                            <td style="padding:10px 14px; text-align:right;">${formatQuantity(row.closing)}</td>
+                            <td style="padding:10px 14px; text-align:right;">${formatQuantity(row.sold)}</td>
+                            <td style="padding:10px 14px; text-align:right;">${formatMoney(row.price)}</td>
+                            <td style="padding:10px 14px; text-align:right; font-weight:700;">${formatMoney(row.total)}</td>
+                        </tr>
+                    `).join('')}
+                    <tr style="background:#f8fafc; font-weight:700;">
+                        <td style="padding:12px 14px;">TOTAL</td>
+                        <td style="padding:12px 14px;"></td>
+                        <td style="padding:12px 14px;"></td>
+                        <td style="padding:12px 14px;"></td>
+                        <td style="padding:12px 14px;"></td>
+                        <td style="padding:12px 14px;"></td>
+                        <td style="padding:12px 14px; text-align:right;">${formatMoney(totalSales)}</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
 function getTransferDestinationBranches() {
     const currentBranchId = state.branchId || state.user?.branch_id || state.user?.default_branch_id || '';
     return (state.branches || []).filter((branch) =>
@@ -4071,53 +4190,38 @@ window.viewShiftDetail = async (shiftId) => {
     const detailContent = document.getElementById('shiftDetailContent');
     tableContainer.style.display = 'none';
     detailView.style.display = 'block';
-    detailContent.innerHTML = '<p style="text-align:center;">Calculating Reconciliation...</p>';
+    detailContent.innerHTML = '<p style="text-align:center;">Loading shift recall...</p>';
 
     try {
-        const { data: shift, error } = await repositories.getShiftById(getScope(), shiftId);
+        const [{ data: shift, error }, shiftInventoryResult, productsResult] = await Promise.all([
+            repositories.getShiftById(getScope(), shiftId),
+            repositories.getShiftInventory(getScope(), shiftId),
+            repositories.getProducts(getScope(), { includeInactive: true })
+        ]);
         if (error) throw error;
+        if (shiftInventoryResult.error) throw shiftInventoryResult.error;
+        if (productsResult.error) throw productsResult.error;
 
-        const mpesaIncome = calculateMpesaIncome(shift.mpesa_float, shift.mpesa_closing, shift.mpesa_withdrawals);
-        const totalIncome = calculateAccountedIncome({
-            cashAtHand: shift.cash_at_hand,
-            mpesaIncome,
-            totalExpenses: shift.total_expenses,
-            debtGiven: shift.total_debts,
-            prevDebtsPaid: shift.debts_collected
-        });
-        const variance = calculateVariance(shift.total_sales, totalIncome);
+        const shiftLabel = annotateShiftsForDisplay([shift], state.shiftSystem)?.[0]?.shiftLabel || '--';
+        const recallRows = buildShiftRecallRows(shiftInventoryResult.data || [], productsResult.data || []);
 
         detailContent.innerHTML = `
             <div style="background:white; padding:20px; border-radius:8px; border:1px solid #e2e8f0; box-shadow:0 2px 4px rgba(0,0,0,0.05);">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; border-bottom:1px solid #eee; padding-bottom:10px;">
-                    <h3 style="margin:0;">Shift Reconciliation</h3>
-                    <span style="color:#64748b; font-size:12px;">Ref: ${shift.id.slice(0, 8)} | ${new Date(shift.created_at).toLocaleDateString()}</span>
-                </div>
-                <div style="background:#f8fafc; padding:15px; border-radius:8px; margin-bottom:20px;">
-                    <div style="color:#7092ae; font-weight:bold; font-size:12px; margin-bottom:10px;">M-PESA CALCULATION</div>
-                    <div style="display:flex; justify-content:space-between; font-size:14px; margin-bottom:5px;">
-                        <span>Closing Balance + Withdrawals:</span>
-                        <span>${(toNumber(shift.mpesa_closing) + toNumber(shift.mpesa_withdrawals)).toLocaleString()}</span>
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:20px; border-bottom:1px solid #eee; padding-bottom:12px;">
+                    <div>
+                        <h3 style="margin:0 0 4px 0;">Shift Recall</h3>
+                        <div style="color:#64748b; font-size:12px;">Ref: ${shift.id.slice(0, 8)} | ${formatShiftRecallDate(shift.created_at)}</div>
                     </div>
-                    <div style="display:flex; justify-content:space-between; font-size:14px; border-bottom:1px solid #cbd5e0; padding-bottom:5px; margin-bottom:5px;">
-                        <span>Less Opening Balance:</span>
-                        <span>- ${toNumber(shift.mpesa_float).toLocaleString()}</span>
-                    </div>
-                    <div style="display:flex; justify-content:space-between; font-weight:bold;">
-                        <span>M-Pesa Income:</span>
-                        <span>Ksh ${mpesaIncome.toLocaleString()}</span>
+                    <div style="display:inline-flex; align-items:center; gap:8px; background:#eff6ff; color:#1d4ed8; border-radius:999px; padding:8px 12px; font-weight:700;">
+                        ${shiftLabel}
                     </div>
                 </div>
-                <table style="width:100%; border-collapse:collapse; margin-bottom:20px;">
-                    <tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:10px 0;">M-Pesa Income</td><td style="text-align:right;">+ ${mpesaIncome.toLocaleString()}</td></tr>
-                    <tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:10px 0;">Cash at Hand (In)</td><td style="text-align:right;">+ ${toNumber(shift.cash_at_hand).toLocaleString()}</td></tr>
-                    <tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:10px 0;">New Debt Given</td><td style="text-align:right;">+ ${toNumber(shift.total_debts).toLocaleString()}</td></tr>
-                    <tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:10px 0;">Expenses Paid</td><td style="text-align:right;">+ ${toNumber(shift.total_expenses).toLocaleString()}</td></tr>
-                    <tr style="border-bottom:2px solid #2d3748;"><td style="padding:10px 0; color:#e11d48;">Less: Prev. Debts Paid</td><td style="text-align:right; color:#e11d48;">- ${toNumber(shift.debts_collected).toLocaleString()}</td></tr>
-                    <tr style="background:#f1f5f9; font-weight:bold; font-size:1.1em;"><td style="padding:12px;">TOTAL ACCOUNTED INCOME</td><td style="text-align:right;">Ksh ${totalIncome.toLocaleString()}</td></tr>
-                    <tr style="border-bottom:1px solid #eee;"><td style="padding:12px;">SYSTEM TOTAL SALES</td><td style="text-align:right;">Ksh ${toNumber(shift.total_sales).toLocaleString()}</td></tr>
-                    <tr style="background:${Math.abs(variance) < 0.01 ? '#f0fdf4' : '#fff1f2'}; color:${Math.abs(variance) < 0.01 ? '#166534' : '#e11d48'};"><td style="padding:12px; font-weight:bold;">VARIANCE</td><td style="text-align:right; font-weight:bold;">Ksh ${variance.toLocaleString()}</td></tr>
-                </table>
+                ${buildShiftRecallSummaryCards(shift, shiftLabel)}
+                <div style="margin-bottom:12px; font-size:12px; color:#64748b; text-transform:uppercase; letter-spacing:0.04em; font-weight:700;">Item Detail</div>
+                ${renderShiftRecallTable(recallRows)}
+                <div style="margin-top:12px; font-size:12px; color:#64748b;">
+                    Use this view to inspect opening, added, closing, sold, price, and total for each item in the selected shift.
+                </div>
             </div>
         `;
     } catch (error) {
