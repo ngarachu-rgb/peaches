@@ -735,6 +735,63 @@ function splitMaterialName(storedName) {
     };
 }
 
+function escapeOptionValue(value) {
+    return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+function renderRawMaterialNameSuggestions() {
+    const datalist = document.getElementById('rawNameSuggestions');
+    if (!datalist) return;
+
+    const uniqueNames = Array.from(new Set(
+        (state.rawMaterials || [])
+            .map((material) => splitMaterialName(material.name).name)
+            .map((name) => String(name || '').trim())
+            .filter(Boolean)
+    )).sort((a, b) => a.localeCompare(b));
+
+    datalist.innerHTML = uniqueNames
+        .map((name) => `<option value="${escapeOptionValue(name)}"></option>`)
+        .join('');
+}
+
+function updateRawMaterialNameHint() {
+    const hint = document.getElementById('rawNameHint');
+    const input = document.getElementById('rawName');
+    const idField = document.getElementById('rawMaterialId');
+    if (!hint || !input || !idField) return;
+
+    const typedName = String(input.value || '').trim().toLowerCase();
+    const editingId = String(idField.value || '');
+
+    if (!typedName) {
+        hint.innerText = 'Start typing to check whether this material name already exists.';
+        hint.style.color = '#64748b';
+        return;
+    }
+
+    const existingMatch = (state.rawMaterials || []).find((material) => {
+        if (editingId && String(material.id) === editingId) return false;
+        return splitMaterialName(material.name).name.trim().toLowerCase() === typedName;
+    });
+
+    if (existingMatch) {
+        const splitName = splitMaterialName(existingMatch.name);
+        hint.innerText = splitName.code
+            ? `Existing item found: ${splitName.code} - ${splitName.name}`
+            : `Existing item found: ${splitName.name}`;
+        hint.style.color = '#b45309';
+        return;
+    }
+
+    hint.innerText = 'No exact existing material name match found.';
+    hint.style.color = '#64748b';
+}
+
 function getDisplayMaterialName(storedName) {
     return splitMaterialName(storedName).name || String(storedName || '').trim();
 }
@@ -1224,6 +1281,8 @@ async function loadRawMaterials() {
     const { data, error } = await repositories.getRawMaterials(getScope());
     if (error) throw error;
     state.rawMaterials = data || [];
+    renderRawMaterialNameSuggestions();
+    updateRawMaterialNameHint();
     const canManageRawMaterials = hasPermission(state.permissions, PERMISSIONS.MANAGE_RAW_MATERIALS);
 
     const rawBody = document.getElementById('rawMaterialBody');
@@ -3875,6 +3934,7 @@ window.resetRawForm = () => {
     document.getElementById('rawFormTitle').innerText = 'Add New Raw Material';
     document.getElementById('cancelRawBtn').style.display = 'none';
     document.getElementById('saveRawBtn').innerText = 'Save Material';
+    updateRawMaterialNameHint();
 };
 
 window.editRawMaterial = (id) => {
@@ -3893,6 +3953,11 @@ window.editRawMaterial = (id) => {
     document.getElementById('rawFormTitle').innerText = 'Edit Raw Material';
     document.getElementById('cancelRawBtn').style.display = 'inline-block';
     document.getElementById('saveRawBtn').innerText = 'Update Material';
+    updateRawMaterialNameHint();
+};
+
+window.checkRawMaterialNameMatch = () => {
+    updateRawMaterialNameHint();
 };
 
 window.deleteRawMaterial = async (id) => {
