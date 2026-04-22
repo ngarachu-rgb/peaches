@@ -343,9 +343,9 @@ async function closeDirectSalesShift(context, repositories, currentShift, payloa
             const nextRow = {
                 shift_id: currentShift.id,
                 product_id: row.productId,
-                bbf: 0,
-                added_today: 0,
-                close_qty: 0,
+                bbf: row.openingQty,
+                added_today: row.producedQty,
+                close_qty: row.closingQty,
                 sold_qty: row.soldQty
             };
 
