@@ -60,13 +60,13 @@
             }
 
             #salesTable th {
-                color: #7092ae;
+                color: #f8fafc;
                 text-transform: capitalize;
             }
             #salesTable thead th {
                 position: sticky;
                 top: 0;
-                background: #2b8ef2;
+                background: #274766;
                 z-index: 10;
             }           
 
@@ -105,8 +105,6 @@
     </div>
     <button id="logoutBtn" onclick="handleLogout()" style="color: #e74c3c; border-bottom: 1px solid #435a6f; margin-bottom: 12px;">Logout</button>
     <div id="branchSwitcherWrap" class="hidden" style="padding: 0 20px 18px 20px; border-bottom: 1px solid #435a6f; margin-bottom: 12px;">
-        <div style="font-size: 11px; color: #9fb3c8; text-transform: uppercase; margin-bottom: 6px;">Branch Scope</div>
-        <div id="branchScopeLabel" style="font-size: 13px; font-weight: 700; color: white; margin-bottom: 8px;">--</div>
         <select id="branchSwitcher" name="branchSwitcher" onchange="switchBranchContext(this.value)" style="background: #f8fafc; color: #1f2937; border: 1px solid #cbd5e0;">
             <option value="">Select branch</option>
         </select>
@@ -125,33 +123,28 @@
 <main>
 <div id="salesPage" class="page active">
     <div class="card">
-        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                <h2 style="font-size: 1em; font-weight: bold;">Daily Sales</h2>
-            </div>
-            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:1px; padding:2px 4px; min-width:100px;">
-                <div style="font-size: 1em; color:#64748b; text-transform:uppercase;">Date</div>
+        <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px;">
+            <h2 style="font-size: 1.8em; font-weight: 700; margin: 0;">Daily Sales</h2>
+            <div style="display:flex; align-items:center; gap:8px; background:#f8fafc; border:1px solid #d7e1eb; border-radius:10px; padding:8px 12px; min-width:170px;">
+                <div style="font-size: 12px; color:#64748b; text-transform:uppercase; letter-spacing:0.04em;">Reporting Date</div>
                 <div id="salesCurrentDate" style="font-size:16px; font-weight:700; color:#2c3e50;">--</div>
             </div>
-            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px 16px; min-width:180px;">
-                <div style="font-size: 1em; color:#64748b; text-transform:uppercase;">Current Shift</div>
-                <div id="salesCurrentShift" style="font-size:16px; font-weight:700; color:#2c3e50;">--</div>
+            <div style="flex:1; min-width:180px; max-width:280px;">
+                <input type="text" id="salesSearch" placeholder="Search item" oninput="filterSales()"
+                    style="border-radius: 12px; padding: 8px 14px; border: 1px solid #7092ae; min-height: 40px;">
             </div>
-             </div>
-                        <div style="width: 100px;">
-                    <input type="text" id="salesSearch" placeholder="SEARCH ITEM" oninput="filterSales()" 
-                        style="border-radius: 20px; padding: 10px 20px; border: 1px solid #7092ae;">
-            </div>
+        </div>
+        <div id="salesCurrentShift" class="hidden">--</div>
         
         <table id="salesTable" style="display: table; border: none;">
             <thead>
-                <tr style="border-bottom: 1px solid #251818a6;">
-                    <th id="salesHeaderItem" style="color: #e6eaed; background: none;">Item</th>
-                    <th id="salesHeaderOpening" style="color: #e6eaed; background: none;">Opening</th>
-                    <th id="salesHeaderAdded" style="color:  #e6eaed; background: none;">Added</th>
-                    <th id="salesHeaderClosing" style="color: #e6eaed; background: none;">Closing</th>
-                    <th id="salesHeaderSold" style="color:  #e6eaed; background: none;">Sold</th>
-                    <th id="salesHeaderTotal" style="color: #e6eaed; background: none;">Total</th>
+                <tr style="border-bottom: 1px solid #1f3146;">
+                    <th id="salesHeaderItem" style="background: none;">Item</th>
+                    <th id="salesHeaderOpening" style="background: none;">Opening</th>
+                    <th id="salesHeaderAdded" style="background: none;">Added</th>
+                    <th id="salesHeaderClosing" style="background: none;">Closing</th>
+                    <th id="salesHeaderSold" style="background: none;">Sold</th>
+                    <th id="salesHeaderTotal" style="background: none;">Total</th>
                 </tr>
             </thead>
             <tbody id="salesBody">

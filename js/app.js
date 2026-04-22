@@ -428,17 +428,14 @@ function resetBranchScopedDrafts() {
 
 function updateBranchSwitcher() {
     const wrap = document.getElementById('branchSwitcherWrap');
-    const label = document.getElementById('branchScopeLabel');
     const select = document.getElementById('branchSwitcher');
-    if (!wrap || !label || !select) return;
+    if (!wrap || !select) return;
 
     const activeBranches = (state.branches || []).filter((branch) => branch.is_active !== false);
     const branchName = getCurrentBranchName();
     const canSwitch = canSwitchBranches(state.role);
 
     wrap.classList.toggle('hidden', !activeBranches.length);
-    label.innerText = branchName || '--';
-
     const options = activeBranches.map((branch) => `
         <option value="${branch.id}" ${String(branch.id) === String(state.branchId || '') ? 'selected' : ''}>
             ${formatBranchDisplayName(branch)}
