@@ -1026,28 +1026,24 @@ async function refreshCurrentShiftSummary() {
 }
 
 function updateShiftStatusPanel(shiftDateOverride = '', shiftTypeOverride = '') {
-    const panel = document.getElementById('shiftStatusPanel');
-    const summaryNode = document.getElementById('shiftStatusSummary');
-    const branchNode = document.getElementById('shiftStatusBranch');
-    const dateNode = document.getElementById('shiftStatusDate');
-    const typeNode = document.getElementById('shiftStatusType');
-    const modeNode = document.getElementById('shiftStatusMode');
-    if (!panel || !summaryNode || !branchNode || !dateNode || !typeNode || !modeNode) return;
-
-    panel.classList.remove('hidden');
+    const branchNode = document.getElementById('sidebarShiftBranch');
+    const dateNode = document.getElementById('sidebarShiftDate');
+    const metaNode = document.getElementById('sidebarShiftMeta');
+    if (!branchNode || !dateNode || !metaNode) return;
 
     const branchName = getCurrentBranchName();
     const shiftDate = shiftDateOverride || (state.currentShift ? toDateOnly(state.currentShift.created_at || new Date()) : '');
     const shiftType = shiftTypeOverride || state.currentShift?.shift_type || (state.shiftSystem === 2 ? 'DAY' : 'FULL');
-    const modeLabel = state.shiftSystem === 2 ? 'Day / Night' : 'Full Shift';
+    const modeLabel = state.shiftSystem === 2 ? 'DAY / NIGHT' : 'FULL SHIFT';
 
     branchNode.innerText = branchName || '--';
     dateNode.innerText = shiftDate ? new Date(`${shiftDate}T00:00:00`).toLocaleDateString() : '--';
-    typeNode.innerText = state.currentShift ? shiftType : 'No Active Shift';
-    modeNode.innerText = modeLabel;
-    summaryNode.innerText = state.currentShift
+    metaNode.innerText = state.currentShift
         ? `${branchName || '--'} · ${shiftType} shift is active`
         : `${branchName || '--'} · No active shift loaded`;
+    metaNode.innerText = state.currentShift
+        ? `${shiftType} · ${modeLabel}`
+        : 'NO ACTIVE SHIFT';
 }
 
 function resolveDirectSalesMaterial(materialName, materials = state.rawMaterials) {
