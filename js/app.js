@@ -4174,7 +4174,7 @@ window.loadShiftReport = async () => {
                       <td style="padding:12px; font-weight:bold;">${toNumber(shift.total_sales).toLocaleString()}</td>
                       <td style="padding:12px;">${mpesaIncome.toLocaleString()}</td>
                       <td style="padding:12px; font-weight:bold; color:${Math.abs(variance) < 0.01 ? '#166534' : '#e11d48'};">${variance.toLocaleString()}</td>
-                    <td style="padding:12px;"><button class="btn" onclick="viewShiftDetail('${shift.id}')" style="background:#fff; border:1px solid #ccc; padding:4px 10px; border-radius:4px; cursor:pointer;">VIEW</button></td>
+                    <td style="padding:12px;"><button class="btn" onclick="viewShiftDetail('${shift.id}')" style="background:#274766; color:white; border:1px solid #1f3146; padding:6px 12px; border-radius:6px; cursor:pointer; font-weight:700;">Shift Recall</button></td>
                 </tr>
             `;
         }).join('');
