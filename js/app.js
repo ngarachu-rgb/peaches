@@ -1309,6 +1309,7 @@ function updateIngredientUnitHint(rowNumber) {
 async function loadStockReceipts() {
     const { data, error } = await repositories.getStockReceipts(getScope());
     if (error) throw error;
+    const currentShiftId = String(state.currentShift?.id || '');
     const materialMetaMap = new Map(
         (state.rawMaterials || []).map((material) => [
             String(material.name || '').trim().toLowerCase(),
@@ -1320,7 +1321,11 @@ async function loadStockReceipts() {
             }
         ])
     );
-    document.getElementById('stockReceiptsBody').innerHTML = (data || []).map((row) => `
+    const shiftRows = (data || []).filter((row) =>
+        !currentShiftId || String(row.shift_id || '') === currentShiftId
+    );
+
+    document.getElementById('stockReceiptsBody').innerHTML = shiftRows.length ? shiftRows.map((row) => `
         <tr>
             <td>${new Date(row.created_at).toLocaleDateString()}</td>
             <td>${getDisplayMaterialName(row.material_name)}</td>
@@ -1347,7 +1352,7 @@ async function loadStockReceipts() {
             })()}</td>
             <td>${row.received_by || '--'}</td>
         </tr>
-    `).join('');
+    `).join('') : '<tr><td colspan="8" style="text-align:center; padding:24px; color:#64748b;">No items received in this shift yet.</td></tr>';
 }
 
 async function loadStockTransfers() {
@@ -2568,7 +2573,7 @@ window.updateDebtLine = (type, index, field, value) => {
 
 window.addStockReceiptLine = () => {
     ensureStockReceiptDrafts();
-    state.stockReceiptDrafts = [...state.stockReceiptDrafts, createStockReceiptDraft()];
+    state.stockReceiptDrafts = [createStockReceiptDraft(), ...state.stockReceiptDrafts];
     renderStockReceiptBatchInputs();
 };
 
