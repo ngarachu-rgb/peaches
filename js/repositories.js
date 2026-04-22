@@ -960,7 +960,21 @@ export function createRepositories(supabase) {
             );
         },
 
-        getStockReceipts(context) {
+        async getStockReceipts(context) {
+            const richerQuery = applyScope(
+                supabase
+                    .from('stock_receipts')
+                    .select(selectColumns('stock_receipts', 'id, restaurant_id, shift_id, material_name, qty_received, received_by, created_at, buy_unit, store_unit, conversion_factor, qty_posted_store, buy_unit_price, store_unit_price, total_received_cost'))
+                    .order('created_at', { ascending: false }),
+                'stock_receipts',
+                context
+            );
+
+            const richerResult = await richerQuery;
+            if (!richerResult.error || !isMissingColumnError(richerResult.error, 'stock_receipts', 'shift_id')) {
+                return richerResult;
+            }
+
             return applyScope(
                 supabase
                     .from('stock_receipts')
@@ -971,8 +985,24 @@ export function createRepositories(supabase) {
             );
         },
 
-        getStockReceiptsByRange(context, startDate, endDate) {
+        async getStockReceiptsByRange(context, startDate, endDate) {
             const effectiveEndDate = endDate || startDate;
+            const richerQuery = applyScope(
+                supabase
+                    .from('stock_receipts')
+                    .select(selectColumns('stock_receipts', 'id, restaurant_id, shift_id, material_name, qty_received, received_by, created_at, buy_unit, store_unit, conversion_factor, qty_posted_store, buy_unit_price, store_unit_price, total_received_cost'))
+                    .filter('created_at', 'gte', `${startDate}T00:00:00Z`)
+                    .filter('created_at', 'lte', `${effectiveEndDate}T23:59:59Z`)
+                    .order('created_at', { ascending: false }),
+                'stock_receipts',
+                context
+            );
+
+            const richerResult = await richerQuery;
+            if (!richerResult.error || !isMissingColumnError(richerResult.error, 'stock_receipts', 'shift_id')) {
+                return richerResult;
+            }
+
             return applyScope(
                 supabase
                     .from('stock_receipts')
@@ -989,6 +1019,7 @@ export function createRepositories(supabase) {
             const attempts = [
                 attachBranchPayload('stock_receipts', context, {
                     restaurant_id: context.restaurantId,
+                    shift_id: payload.shiftId,
                     material_name: payload.materialName,
                     qty_received: payload.qtyReceived,
                     received_by: payload.receivedBy,
@@ -1012,6 +1043,7 @@ export function createRepositories(supabase) {
                 (record) => supabase.from('stock_receipts').insert([record]).select('*').single(),
                 attempts,
                 [
+                    { tableName: 'stock_receipts', columnName: 'shift_id' },
                     { tableName: 'stock_receipts', columnName: 'buy_unit' },
                     { tableName: 'stock_receipts', columnName: 'store_unit' },
                     { tableName: 'stock_receipts', columnName: 'conversion_factor' },

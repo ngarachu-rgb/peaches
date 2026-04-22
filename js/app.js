@@ -1319,6 +1319,9 @@ async function loadStockReceipts() {
     const { data, error } = await repositories.getStockReceipts(getScope());
     if (error) throw error;
     const currentShiftId = String(state.currentShift?.id || '');
+    const currentShiftCreatedAt = state.currentShift?.created_at
+        ? new Date(state.currentShift.created_at).getTime()
+        : 0;
     const materialMetaMap = new Map(
         (state.rawMaterials || []).map((material) => [
             String(material.name || '').trim().toLowerCase(),
@@ -1330,9 +1333,20 @@ async function loadStockReceipts() {
             }
         ])
     );
-    const shiftRows = (data || []).filter((row) =>
-        !currentShiftId || String(row.shift_id || '') === currentShiftId
-    );
+    const shiftRows = (data || []).filter((row) => {
+        if (!currentShiftId) return true;
+
+        if (String(row.shift_id || '') === currentShiftId) {
+            return true;
+        }
+
+        if (!row.shift_id && currentShiftCreatedAt > 0) {
+            const receiptCreatedAt = row.created_at ? new Date(row.created_at).getTime() : 0;
+            return receiptCreatedAt >= currentShiftCreatedAt;
+        }
+
+        return false;
+    });
 
     document.getElementById('stockReceiptsBody').innerHTML = shiftRows.length ? shiftRows.map((row) => `
         <tr>
@@ -3080,12 +3094,13 @@ window.processStockReceipt = async () => {
             const storeUnitPrice = buyUnitPrice / conversionFactor;
             const totalReceivedCost = row.totalReceivedCost;
 
-            const { data: receiptRow, error: receiptError } = await repositories.insertStockReceipt(getScope(), {
-                materialName: material.name,
-                qtyReceived: row.qty,
-                receivedBy: getProfileDisplayName(state.user),
-                buyUnit: material.buy_unit || '',
-                storeUnit: material.store_unit || material.buy_unit || '',
+              const { data: receiptRow, error: receiptError } = await repositories.insertStockReceipt(getScope(), {
+                  shiftId: state.currentShift?.id || null,
+                  materialName: material.name,
+                  qtyReceived: row.qty,
+                  receivedBy: getProfileDisplayName(state.user),
+                  buyUnit: material.buy_unit || '',
+                  storeUnit: material.store_unit || material.buy_unit || '',
                 conversionFactor,
                 qtyPostedStore: postedStoreQty,
                 buyUnitPrice,
