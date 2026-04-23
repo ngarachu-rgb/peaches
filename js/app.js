@@ -1953,16 +1953,16 @@ function renderShiftRecallTable(rows) {
 
     return `
         <div style="overflow-x:auto;">
-            <table style="width:100%; border-collapse:collapse; background:white; border:1px solid #e2e8f0; border-radius:10px; overflow:hidden;">
+            <table class="shift-recall-table" style="width:100%; border-collapse:collapse; background:white; border:1px solid #e2e8f0; border-radius:10px; overflow:hidden;">
                 <thead>
                     <tr>
-                        <th style="padding:12px 14px; text-align:left; background:#000000; color:#ffffff; font-weight:700;">Item</th>
-                        <th style="padding:12px 14px; text-align:right; background:#000000; color:#ffffff; font-weight:700;">Opening</th>
-                        <th style="padding:12px 14px; text-align:right; background:#000000; color:#ffffff; font-weight:700;">Added</th>
-                        <th style="padding:12px 14px; text-align:right; background:#000000; color:#ffffff; font-weight:700;">Closing</th>
-                        <th style="padding:12px 14px; text-align:right; background:#000000; color:#ffffff; font-weight:700;">Sold</th>
-                        <th style="padding:12px 14px; text-align:right; background:#000000; color:#ffffff; font-weight:700;">Price</th>
-                        <th style="padding:12px 14px; text-align:right; background:#000000; color:#ffffff; font-weight:700;">Total</th>
+                        <th style="padding:12px 14px; text-align:left;">Item</th>
+                        <th style="padding:12px 14px; text-align:right;">Opening</th>
+                        <th style="padding:12px 14px; text-align:right;">Added</th>
+                        <th style="padding:12px 14px; text-align:right;">Closing</th>
+                        <th style="padding:12px 14px; text-align:right;">Sold</th>
+                        <th style="padding:12px 14px; text-align:right;">Price</th>
+                        <th style="padding:12px 14px; text-align:right;">Total</th>
                     </tr>
                 </thead>
                 <tbody>
