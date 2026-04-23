@@ -1955,7 +1955,7 @@ function renderShiftRecallTable(rows) {
         <div style="overflow-x:auto;">
             <table style="width:100%; border-collapse:collapse; background:white; border:1px solid #e2e8f0; border-radius:10px; overflow:hidden;">
                 <thead>
-                    <tr style="background:#274766; color:white;">
+                    <tr style="background:#000000; color:white;">
                         <th style="padding:12px 14px; text-align:left;">Item</th>
                         <th style="padding:12px 14px; text-align:right;">Opening</th>
                         <th style="padding:12px 14px; text-align:right;">Added</th>
