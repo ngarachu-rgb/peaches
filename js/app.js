@@ -2006,7 +2006,9 @@ function getBarIssueSourceMaterials() {
 }
 
 function getBarIssueTargetProducts() {
-    return (state.items || []).filter((item) => item.sale_mode === 'measured');
+    return (state.items || [])
+        .filter((item) => item && String(item.name || '').trim())
+        .sort((left, right) => String(left.name || '').localeCompare(String(right.name || '')));
 }
 
 function getBarIssueConversion(sourceMaterialName, targetProductName) {
