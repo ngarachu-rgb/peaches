@@ -2972,7 +2972,8 @@ window.updateBarIssueDraftRow = (index, field, value) => {
 
 window.selectBarIssueSource = (index, value) => {
     ensureBarIssueDrafts();
-    const source = getBarIssueSourceMaterials().find((material) => entityNamesMatch(material.name, value));
+    const source = findRawMaterialByDisplayName(value)
+        || getBarIssueSourceMaterials().find((material) => entityNamesMatch(material.name, value));
     state.barIssueDrafts = state.barIssueDrafts.map((draft, rowIndex) => (
         rowIndex === index
             ? {
@@ -2987,7 +2988,8 @@ window.selectBarIssueSource = (index, value) => {
 
 window.selectBarIssueTarget = (index, value) => {
     ensureBarIssueDrafts();
-    const target = getBarIssueTargetProducts().find((item) => entityNamesMatch(item.name, value));
+    const target = findProductByDisplayName(value)
+        || getBarIssueTargetProducts().find((item) => entityNamesMatch(item.name, value));
     state.barIssueDrafts = state.barIssueDrafts.map((draft, rowIndex) => (
         rowIndex === index
             ? {
@@ -3525,10 +3527,12 @@ window.processBarIssue = async () => {
             for (const row of populatedRows) {
                 const resolvedSourceMaterial = row.sourceMaterialId
                     ? state.rawMaterials.find((material) => String(material.id) === row.sourceMaterialId)
-                    : getBarIssueSourceMaterials().find((material) => entityNamesMatch(material.name, row.sourceMaterialSearch));
+                    : (findRawMaterialByDisplayName(row.sourceMaterialSearch)
+                        || getBarIssueSourceMaterials().find((material) => entityNamesMatch(material.name, row.sourceMaterialSearch)));
                 const resolvedTargetProduct = row.targetProductId
                     ? state.items.find((item) => String(item.product_id) === row.targetProductId)
-                    : getBarIssueTargetProducts().find((item) => entityNamesMatch(item.name, row.targetProductSearch));
+                    : (findProductByDisplayName(row.targetProductSearch)
+                        || getBarIssueTargetProducts().find((item) => entityNamesMatch(item.name, row.targetProductSearch)));
 
                 if (!row.sourceMaterialId && resolvedSourceMaterial?.id) {
                     row.sourceMaterialId = String(resolvedSourceMaterial.id);
