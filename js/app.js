@@ -2000,11 +2000,26 @@ function getTransferDestinationBranches() {
 }
 
 function getBarIssueSourceMaterials() {
-    return (state.rawMaterials || []).filter((material) =>
-        state.items.some((item) =>
-            item.sale_mode === 'full' && entityNamesMatch(item.name, material.name)
-        )
+    const measuredTargets = new Set(
+        (state.items || [])
+            .filter((item) => item.sale_mode === 'measured')
+            .map((item) => String(item.name || '').trim().toLowerCase())
     );
+
+    return (state.rawMaterials || []).filter((material) => {
+        const materialName = String(material.name || '').trim().toLowerCase();
+
+        const matchesFullSaleItem = state.items.some((item) =>
+            item.sale_mode === 'full' && entityNamesMatch(item.name, material.name)
+        );
+
+        const hasMeasuredRecipeLink = (state.recipeMatrix || []).some((recipe) =>
+            String(recipe.material_name || '').trim().toLowerCase() === materialName &&
+            measuredTargets.has(String(recipe.finished_item_name || '').trim().toLowerCase())
+        );
+
+        return matchesFullSaleItem || hasMeasuredRecipeLink;
+    });
 }
 
 function getBarIssueTargetProducts() {
@@ -2173,7 +2188,7 @@ function renderBarIssueView() {
                         name="barIssueSource${index}"
                         list="barIssueSourceList${index}"
                         value="${sourceInputValue}"
-                        placeholder="Start typing full bottle"
+                        placeholder="Start typing source stock item"
                         autocomplete="off"
                         oninput="updateBarIssueDraftRow(${index}, 'sourceMaterialSearch', this.value)"
                         onchange="selectBarIssueSource(${index}, this.value)">
@@ -3522,7 +3537,7 @@ window.processBarIssue = async () => {
         try {
             for (const row of populatedRows) {
                 if (!row.sourceMaterialId) {
-                    throw new Error(`Issue line ${row.index + 1}: select a full bottle item.`);
+                    throw new Error(`Issue line ${row.index + 1}: select a source stock item.`);
                 }
                 if (!row.targetProductId) {
                     throw new Error(`Issue line ${row.index + 1}: select a shots/glasses item.`);
@@ -3534,7 +3549,7 @@ window.processBarIssue = async () => {
                 const sourceMaterial = state.rawMaterials.find((material) => String(material.id) === row.sourceMaterialId);
                 const targetProduct = state.items.find((item) => String(item.product_id) === row.targetProductId);
                 if (!sourceMaterial) {
-                    throw new Error(`Issue line ${row.index + 1}: source full bottle was not found.`);
+                    throw new Error(`Issue line ${row.index + 1}: source stock item was not found.`);
                 }
                 if (!targetProduct) {
                     throw new Error(`Issue line ${row.index + 1}: target measured item was not found.`);
