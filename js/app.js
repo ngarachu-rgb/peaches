@@ -3508,7 +3508,9 @@ window.processBarIssue = async () => {
             .map((draft, index) => ({
                 index,
                 sourceMaterialId: String(draft.sourceMaterialId || ''),
+                sourceMaterialSearch: String(draft.sourceMaterialSearch || '').trim(),
                 targetProductId: String(draft.targetProductId || ''),
+                targetProductSearch: String(draft.targetProductSearch || '').trim(),
                 qty: toNumber(draft.qty),
                 notes: String(draft.notes || '').trim()
             }))
@@ -3521,6 +3523,20 @@ window.processBarIssue = async () => {
         const appliedRows = [];
         try {
             for (const row of populatedRows) {
+                const resolvedSourceMaterial = row.sourceMaterialId
+                    ? state.rawMaterials.find((material) => String(material.id) === row.sourceMaterialId)
+                    : getBarIssueSourceMaterials().find((material) => entityNamesMatch(material.name, row.sourceMaterialSearch));
+                const resolvedTargetProduct = row.targetProductId
+                    ? state.items.find((item) => String(item.product_id) === row.targetProductId)
+                    : getBarIssueTargetProducts().find((item) => entityNamesMatch(item.name, row.targetProductSearch));
+
+                if (!row.sourceMaterialId && resolvedSourceMaterial?.id) {
+                    row.sourceMaterialId = String(resolvedSourceMaterial.id);
+                }
+                if (!row.targetProductId && resolvedTargetProduct?.product_id) {
+                    row.targetProductId = String(resolvedTargetProduct.product_id);
+                }
+
                 if (!row.sourceMaterialId) {
                     throw new Error(`Issue line ${row.index + 1}: select a source stock item.`);
                 }
@@ -3531,8 +3547,8 @@ window.processBarIssue = async () => {
                     throw new Error(`Issue line ${row.index + 1}: quantity must be greater than 0.`);
                 }
 
-                const sourceMaterial = state.rawMaterials.find((material) => String(material.id) === row.sourceMaterialId);
-                const targetProduct = state.items.find((item) => String(item.product_id) === row.targetProductId);
+                const sourceMaterial = resolvedSourceMaterial || state.rawMaterials.find((material) => String(material.id) === row.sourceMaterialId);
+                const targetProduct = resolvedTargetProduct || state.items.find((item) => String(item.product_id) === row.targetProductId);
                 if (!sourceMaterial) {
                     throw new Error(`Issue line ${row.index + 1}: source stock item was not found.`);
                 }
