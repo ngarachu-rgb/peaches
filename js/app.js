@@ -1624,7 +1624,7 @@ function recalculateSalesTotals() {
 
         const soldCell = document.getElementById(`sold_${productId}`);
         const amtCell = document.getElementById(`amt_${productId}`);
-        if (soldCell) soldCell.innerText = soldQty;
+        if (soldCell) soldCell.innerText = formatQuantity(soldQty);
         if (amtCell) amtCell.innerText = amount.toLocaleString();
 
         if (item) {
@@ -1704,7 +1704,7 @@ function renderSales() {
                         value="${explicitValue}"
                         style="display:block; width:120px; padding:6px; border:1px solid #7092ae; border-radius:4px; margin:0;">
                 </td>
-                <td id="sold_${item.product_id}" style="font-weight:bold; text-align:left; color: #2c3e50;">${item.sold || 0}</td>
+                <td id="sold_${item.product_id}" style="font-weight:bold; text-align:left; color: #2c3e50;">${formatQuantity(item.sold || 0)}</td>
                 <td style="font-weight:600; text-align:left; color:#2c3e50;">${formatMoney(item.price || 0)}</td>
                 <td id="amt_${item.product_id}" class="row-amt" style="font-weight:bold; text-align:left;">0</td>
             </tr>
