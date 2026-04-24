@@ -141,7 +141,7 @@ function entityNamesMatch(left, right) {
 }
 
 function isMeasuredRecipeProductName(value) {
-    return /(?:^|\s)(30\s*ml|150\s*ml)(?:$|\s)/i.test(String(value || '').trim());
+    return /(?:^|\s)(30\s*ml|150\s*ml|glass)(?:$|\s)/i.test(String(value || '').trim());
 }
 
 function createExpenseDraft() {
