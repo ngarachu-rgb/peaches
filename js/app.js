@@ -2674,6 +2674,7 @@ window.loadBranches = async () => {
         handleError(error, 'Failed to load branches');
     }
 };
+window.renderStoreStockLevels = renderStoreStockLevels;
 window.switchBranchContext = async (branchId) => {
     try {
         if (!canSwitchBranches(state.role)) {
