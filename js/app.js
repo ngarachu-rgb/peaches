@@ -2000,26 +2000,9 @@ function getTransferDestinationBranches() {
 }
 
 function getBarIssueSourceMaterials() {
-    const measuredTargets = new Set(
-        (state.items || [])
-            .filter((item) => item.sale_mode === 'measured')
-            .map((item) => String(item.name || '').trim().toLowerCase())
-    );
-
-    return (state.rawMaterials || []).filter((material) => {
-        const materialName = String(material.name || '').trim().toLowerCase();
-
-        const matchesFullSaleItem = state.items.some((item) =>
-            item.sale_mode === 'full' && entityNamesMatch(item.name, material.name)
-        );
-
-        const hasMeasuredRecipeLink = (state.recipeMatrix || []).some((recipe) =>
-            String(recipe.material_name || '').trim().toLowerCase() === materialName &&
-            measuredTargets.has(String(recipe.finished_item_name || '').trim().toLowerCase())
-        );
-
-        return matchesFullSaleItem || hasMeasuredRecipeLink;
-    });
+    return (state.rawMaterials || [])
+        .filter((material) => material && String(material.name || '').trim())
+        .sort((left, right) => String(left.name || '').localeCompare(String(right.name || '')));
 }
 
 function getBarIssueTargetProducts() {
