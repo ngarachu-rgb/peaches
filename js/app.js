@@ -1041,9 +1041,9 @@ function ensureKitchenDrafts() {
 }
 
 function clampClosingQty(value, max) {
-    const numericValue = toNumber(value);
+    const numericValue = Math.round(toNumber(value) * 100) / 100;
     if (numericValue < 0) return 0;
-    if (numericValue > max) return max;
+    if (numericValue > max) return Math.round(toNumber(max) * 100) / 100;
     return numericValue;
 }
 
@@ -1692,6 +1692,7 @@ function renderSales() {
                           placeholder="${directSalesMode ? 'Bal Qty' : 'Insert qty'}"
                         oninput="calcSalesRow(this, ${totalAvailable}, ${item.price})"
                         min="0"
+                        step="0.01"
                         max="${totalAvailable}"
                         data-id="${item.product_id}"
                         data-product-id="${item.product_id}"
