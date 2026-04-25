@@ -81,7 +81,7 @@ function entityNamesMatch(left, right) {
 }
 
 function isMeasuredRecipeProductName(value) {
-    return /(?:^|\s)(30\s*ml|150\s*ml)(?:$|\s)/i.test(String(value || '').trim());
+    return /(?:^|\s)(30\s*ml|150\s*ml|glass)(?:$|\s)/i.test(String(value || '').trim());
 }
 
 function getSellableUnitsForMaterial(material) {
@@ -150,21 +150,9 @@ async function buildDirectSalesDeductionPlan(context, repositories, inventoryRow
         const soldQty = toNumber(row.soldQty);
         if (soldQty <= 0) continue;
 
-        const matchingRecipes = recipes.filter((recipe) => entityNamesMatch(recipe.finished_item_name, row.name));
-        if (matchingRecipes.length && isMeasuredRecipeProductName(row.name)) {
-            for (const recipe of matchingRecipes) {
-                const material = resolveMaterial(recipe.material_name);
-                if (!material) {
-                    throw new Error(`Recipe material "${recipe.material_name}" was not found in store stock.`);
-                }
-
-                const qtyPerUnit = toNumber(recipe.qty_per_unit);
-                if (qtyPerUnit <= 0) {
-                    throw new Error(`Recipe quantity for "${recipe.material_name}" must be greater than 0.`);
-                }
-
-                appendDeduction(material, soldQty * qtyPerUnit);
-            }
+        // Measured direct-sales items (shots / glasses) are already deducted from store
+        // when stock is issued into shift stock. Do not deduct them again at shift close.
+        if (isMeasuredRecipeProductName(row.name)) {
             continue;
         }
 
