@@ -1173,6 +1173,21 @@ function getIssueHistoryForShift(shiftId) {
     return (state.barStockIssues || []).filter((issue) => String(issue.shift_id || '') === String(shiftId || ''));
 }
 
+function canDeleteStockHistory() {
+    return [ROLES.DEVELOPER, ROLES.SYSTEM_ADMIN, ROLES.MANAGER].includes(state.role);
+}
+
+function isRecordInCurrentShiftWindow(row) {
+    if (!row || !state.currentShift?.created_at) return false;
+    if (row.shift_id && state.currentShift?.id) {
+        return String(row.shift_id) === String(state.currentShift.id);
+    }
+
+    const shiftStart = new Date(state.currentShift.created_at).getTime();
+    const rowCreatedAt = row.created_at ? new Date(row.created_at).getTime() : 0;
+    return rowCreatedAt >= shiftStart;
+}
+
 function getIssuedSourceQtyForProduct(productName, shiftId = state.currentShift?.id) {
     return getIssueHistoryForShift(shiftId)
         .filter((issue) => entityNamesMatch(issue.source_material_name, productName))
@@ -1406,6 +1421,8 @@ async function loadStockReceipts() {
 
         return false;
     });
+    state.stockReceipts = shiftRows;
+    const canDelete = canDeleteStockHistory();
 
     document.getElementById('stockReceiptsBody').innerHTML = shiftRows.length ? shiftRows.map((row) => `
         <tr>
@@ -1433,8 +1450,13 @@ async function loadStockReceipts() {
                 return `${postedQty.toLocaleString()} @ ${formatMoney(storeUnitPrice)}`;
             })()}</td>
             <td>${row.received_by || '--'}</td>
+            <td style="text-align:right;">
+                ${canDelete && isRecordInCurrentShiftWindow(row)
+                    ? `<button class="btn" style="background:#e74c3c; color:white;" onclick="deleteStockReceiptHistory('${row.id}')">Delete</button>`
+                    : '--'}
+            </td>
         </tr>
-    `).join('') : '<tr><td colspan="8" style="text-align:center; padding:24px; color:#64748b;">No items received in this shift yet.</td></tr>';
+    `).join('') : '<tr><td colspan="9" style="text-align:center; padding:24px; color:#64748b;">No items received in this shift yet.</td></tr>';
 }
 
 async function loadStockTransfers() {
@@ -2152,6 +2174,7 @@ function renderBarIssueView() {
     ensureBarIssueDrafts();
     const sources = getBarIssueSourceMaterials();
     const targets = getBarIssueTargetProducts();
+    const canDelete = canDeleteStockHistory();
 
     batchBody.innerHTML = state.barIssueDrafts.map((draft, index) => {
         const selectedSource = sources.find((material) => String(material.id) === String(draft.sourceMaterialId || ''));
@@ -2219,7 +2242,7 @@ function renderBarIssueView() {
     }).join('');
 
     if (!state.barStockIssues.length) {
-        historyBody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:24px; color:#64748b;">No issue history recorded for this branch yet.</td></tr>';
+        historyBody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:24px; color:#64748b;">No issue history recorded for this branch yet.</td></tr>';
         return;
     }
 
@@ -2232,6 +2255,11 @@ function renderBarIssueView() {
             <td>${formatQuantity(issue.qty_added_target)} ${issue.target_unit || 'units'}</td>
             <td>${issue.created_by || '--'}</td>
             <td>${issue.notes || '--'}</td>
+            <td style="text-align:right;">
+                ${canDelete && isRecordInCurrentShiftWindow(issue)
+                    ? `<button class="btn" style="background:#e74c3c; color:white;" onclick="deleteBarIssueHistory('${issue.id}')">Delete</button>`
+                    : '--'}
+            </td>
         </tr>
     `).join('');
 }
@@ -2248,6 +2276,7 @@ function renderStockTransferView() {
     const sourceBranchNode = document.getElementById('stockTransferFromBranchLabel');
     const batchBody = document.getElementById('stockTransferBatchBody');
     const historyBody = document.getElementById('stockTransfersBody');
+    const canDelete = canDeleteStockHistory();
 
     if (sourceBranchNode) {
         sourceBranchNode.innerText = getCurrentBranchName() || '--';
@@ -2328,7 +2357,7 @@ function renderStockTransferView() {
     );
 
     if (!rows.length) {
-        historyBody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:24px; color:#64748b;">No transfers recorded for this branch yet.</td></tr>';
+        historyBody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:24px; color:#64748b;">No transfers recorded for this branch yet.</td></tr>';
         return;
     }
 
@@ -2341,6 +2370,11 @@ function renderStockTransferView() {
             <td>${formatQuantity(row.qty)} ${row.unit || ''}</td>
             <td>${row.created_by || '--'}</td>
             <td>${row.notes || '--'}</td>
+            <td style="text-align:right;">
+                ${canDelete && isRecordInCurrentShiftWindow(row)
+                    ? `<button class="btn" style="background:#e74c3c; color:white;" onclick="deleteStockTransferHistory('${row.id}')">Delete</button>`
+                    : '--'}
+            </td>
         </tr>
     `).join('');
 }
@@ -3666,6 +3700,181 @@ window.processBarIssue = async () => {
         handleError(error, 'Failed to record issue to shots');
     } finally {
         setLoading(button, false);
+    }
+};
+
+window.deleteStockReceiptHistory = async (receiptId) => {
+    try {
+        requirePermission(PERMISSIONS.RECEIVE_STOCK);
+        if (!canDeleteStockHistory()) {
+            throw new Error('Only managers can delete stock history entries.');
+        }
+
+        const receipt = (state.stockReceipts || []).find((row) => String(row.id) === String(receiptId));
+        if (!receipt) {
+            throw new Error('Selected stock receipt was not found in the current shift view.');
+        }
+        if (!isRecordInCurrentShiftWindow(receipt)) {
+            throw new Error('Only current-shift stock receipts can be deleted.');
+        }
+        if (!confirm(`Delete receipt for ${getDisplayMaterialName(receipt.material_name)} and reverse its stock addition?`)) {
+            return;
+        }
+
+        const reverseQty = toNumber(
+            receipt.qty_posted_store ??
+            (toNumber(receipt.qty_received) * Math.max(toNumber(receipt.conversion_factor), 1))
+        );
+
+        const stockResult = await repositories.adjustRawMaterialStoreStock(getScope(), receipt.material_name, -reverseQty);
+        if (stockResult.error) throw stockResult.error;
+
+        const deleteResult = await repositories.deleteStockReceipt(getScope(), receipt.id);
+        if (deleteResult.error) {
+            await repositories.adjustRawMaterialStoreStock(getScope(), receipt.material_name, reverseQty);
+            throw deleteResult.error;
+        }
+
+        await loadStockReceipts();
+        await loadRawMaterials();
+        if (document.getElementById('storeStockLevelsBody')) {
+            renderStoreStockLevels();
+        }
+        updateDropdowns();
+        alert('Stock receipt deleted and stock reversed.');
+    } catch (error) {
+        handleError(error, 'Failed to delete stock receipt');
+    }
+};
+
+window.deleteStockTransferHistory = async (transferId) => {
+    try {
+        requirePermission(PERMISSIONS.RECEIVE_STOCK);
+        if (!canDeleteStockHistory()) {
+            throw new Error('Only managers can delete stock history entries.');
+        }
+
+        const transfer = (state.stockTransfers || []).find((row) => String(row.id) === String(transferId));
+        if (!transfer) {
+            throw new Error('Selected stock transfer was not found.');
+        }
+        if (!isRecordInCurrentShiftWindow(transfer)) {
+            throw new Error('Only current-shift transfers can be deleted.');
+        }
+        if (!confirm(`Delete transfer of ${getDisplayMaterialName(transfer.material_name)} and reverse the stock movement?`)) {
+            return;
+        }
+
+        const qty = toNumber(transfer.qty);
+        const toBranchReverse = await repositories.adjustRawMaterialStoreStockByBranch(getScope(), transfer.to_branch_id, transfer.material_name, -qty);
+        if (toBranchReverse.error) throw toBranchReverse.error;
+
+        const fromBranchRestore = await repositories.adjustRawMaterialStoreStockByBranch(getScope(), transfer.from_branch_id, transfer.material_name, qty);
+        if (fromBranchRestore.error) {
+            await repositories.adjustRawMaterialStoreStockByBranch(getScope(), transfer.to_branch_id, transfer.material_name, qty);
+            throw fromBranchRestore.error;
+        }
+
+        const deleteResult = await repositories.deleteStockTransfer(getScope(), transfer.id);
+        if (deleteResult.error) {
+            await repositories.adjustRawMaterialStoreStockByBranch(getScope(), transfer.from_branch_id, transfer.material_name, -qty);
+            await repositories.adjustRawMaterialStoreStockByBranch(getScope(), transfer.to_branch_id, transfer.material_name, qty);
+            throw deleteResult.error;
+        }
+
+        await loadRawMaterials();
+        await loadStockTransfers();
+        if (document.getElementById('storeStockLevelsBody')) {
+            renderStoreStockLevels();
+        }
+        updateDropdowns();
+        alert('Stock transfer deleted and stock reversed.');
+    } catch (error) {
+        handleError(error, 'Failed to delete stock transfer');
+    }
+};
+
+window.deleteBarIssueHistory = async (issueId) => {
+    try {
+        requirePermission(PERMISSIONS.RECEIVE_STOCK);
+        if (!canDeleteStockHistory()) {
+            throw new Error('Only managers can delete stock history entries.');
+        }
+
+        const issue = (state.barStockIssues || []).find((row) => String(row.id) === String(issueId));
+        if (!issue) {
+            throw new Error('Selected issue record was not found.');
+        }
+        if (!isRecordInCurrentShiftWindow(issue)) {
+            throw new Error('Only current-shift issue records can be deleted.');
+        }
+        if (!confirm(`Delete issue from ${getDisplayMaterialName(issue.source_material_name)} to ${getDisplayProductName(issue.target_product_name)} and reverse its stock impact?`)) {
+            return;
+        }
+
+        const sourceMaterial = (state.rawMaterials || []).find((material) => entityNamesMatch(material.name, issue.source_material_name));
+        if (!sourceMaterial) {
+            throw new Error(`Source stock item "${getDisplayMaterialName(issue.source_material_name)}" was not found.`);
+        }
+
+        const targetProduct = (state.items || []).find((item) => entityNamesMatch(item.name, issue.target_product_name));
+        if (!targetProduct) {
+            throw new Error(`Target product "${getDisplayProductName(issue.target_product_name)}" was not found.`);
+        }
+
+        const { data: existingRow, error: existingRowError } = await repositories.getShiftInventoryRow(getScope(), issue.shift_id || state.currentShift?.id, targetProduct.product_id);
+        if (existingRowError) throw existingRowError;
+
+        const currentAddedQty = toNumber(existingRow?.added_today);
+        const nextAddedQty = currentAddedQty - toNumber(issue.qty_added_target);
+        if (nextAddedQty < 0) {
+            throw new Error(`Cannot delete this issue because ${getDisplayProductName(issue.target_product_name)} only has ${formatQuantity(currentAddedQty)} added units recorded.`);
+        }
+
+        const sourceRestoreQty = toNumber(issue.qty_issued_source) * Math.max(toNumber(sourceMaterial.conversion_factor), 1);
+        const restoreResult = await repositories.adjustRawMaterialStoreStock(getScope(), sourceMaterial.name, sourceRestoreQty);
+        if (restoreResult.error) throw restoreResult.error;
+
+        const upsertPayload = {
+            shift_id: issue.shift_id || state.currentShift?.id,
+            product_id: targetProduct.product_id,
+            bbf: toNumber(existingRow?.bbf),
+            added_today: nextAddedQty,
+            close_qty: toNumber(existingRow?.close_qty),
+            sold_qty: toNumber(existingRow?.sold_qty)
+        };
+        if (existingRow?.id) {
+            upsertPayload.id = existingRow.id;
+        }
+
+        const { error: upsertError } = await repositories.upsertShiftInventoryRows(getScope(), [upsertPayload]);
+        if (upsertError) {
+            await repositories.adjustRawMaterialStoreStock(getScope(), sourceMaterial.name, -sourceRestoreQty);
+            throw upsertError;
+        }
+
+        const deleteResult = await repositories.deleteBarStockIssue(getScope(), issue.id);
+        if (deleteResult.error) {
+            await repositories.adjustRawMaterialStoreStock(getScope(), sourceMaterial.name, -sourceRestoreQty);
+            await repositories.upsertShiftInventoryRows(getScope(), [{
+                id: existingRow?.id || upsertPayload.id,
+                shift_id: issue.shift_id || state.currentShift?.id,
+                product_id: targetProduct.product_id,
+                bbf: toNumber(existingRow?.bbf),
+                added_today: currentAddedQty,
+                close_qty: toNumber(existingRow?.close_qty),
+                sold_qty: toNumber(existingRow?.sold_qty)
+            }]);
+            throw deleteResult.error;
+        }
+
+        await loadBarStockIssues();
+        await loadRawMaterials();
+        await loadInventory();
+        updateDropdowns();
+        alert('Issue record deleted and stock reversed.');
+    } catch (error) {
+        handleError(error, 'Failed to delete stock issue');
     }
 };
 

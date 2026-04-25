@@ -34,6 +34,7 @@ export const state = {
     },
     kitchenDrafts: [],
     stockReceiptDrafts: [],
+    stockReceipts: [],
     stockTransfers: [],
     stockTransferDestinationBranchId: '',
     stockTransferDrafts: [],
@@ -137,6 +138,7 @@ export function resetAppState() {
       };
     state.kitchenDrafts = [];
     state.stockReceiptDrafts = [];
+    state.stockReceipts = [];
     state.stockTransfers = [];
     state.stockTransferDestinationBranchId = '';
     state.stockTransferDrafts = [];
