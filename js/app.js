@@ -4654,6 +4654,53 @@ function buildRawItemsReceivedReport(data) {
     };
 }
 
+function buildOutOfStockReport(data) {
+    const showBranch = isAllBranchesReportScope();
+    const rows = (data.rawMaterials || [])
+        .filter((material) => toNumber(material.stock_level ?? material.current_stock) <= 0)
+        .sort((left, right) => {
+            const branchCompare = String(getBranchName(left.branch_id) || '').localeCompare(String(getBranchName(right.branch_id) || ''));
+            if (showBranch && branchCompare !== 0) return branchCompare;
+            return getDisplayMaterialName(left.name).localeCompare(getDisplayMaterialName(right.name));
+        })
+        .map((material) => {
+            const currentStock = toNumber(material.stock_level ?? material.current_stock);
+            const reorderLevel = material.reorder_level === null || material.reorder_level === undefined || material.reorder_level === ''
+                ? '--'
+                : `${formatQuantity(material.reorder_level)} ${material.store_unit || ''}`.trim();
+            return {
+                ...(showBranch ? { branch: getBranchName(material.branch_id) } : {}),
+                item: getDisplayMaterialName(material.name),
+                buy_unit: material.buy_unit || '--',
+                store_unit: material.store_unit || '--',
+                current_stock: `${formatQuantity(currentStock)} ${material.store_unit || ''}`.trim(),
+                reorder_level: reorderLevel,
+                latest_buy_price: formatMoney(material.price),
+                status: currentStock < 0 ? 'Negative Stock' : 'Out of Stock'
+            };
+        });
+
+    return {
+        title: 'Out of Stock Items',
+        columns: [
+            ...(showBranch ? [{ key: 'branch', label: 'Branch' }] : []),
+            { key: 'item', label: 'Item' },
+            { key: 'buy_unit', label: 'Buy Unit' },
+            { key: 'store_unit', label: 'Store Unit' },
+            { key: 'current_stock', label: 'Current Stock' },
+            { key: 'reorder_level', label: 'Reorder Level' },
+            { key: 'latest_buy_price', label: 'Latest Buy Price' },
+            { key: 'status', label: 'Status' }
+        ],
+        rows,
+        notes: [
+            'This report uses the current live store balances for the selected branch scope.',
+            'It is a current stock snapshot and does not depend on the chosen date range.',
+            'Items with zero or negative stock are listed here.'
+        ]
+    };
+}
+
 function buildTransferHistoryReport(data) {
     const showBranch = isAllBranchesReportScope();
     return {
@@ -5178,6 +5225,8 @@ function buildAuditReport(reportType, data) {
     switch (reportType) {
     case 'raw-items-received':
         return buildRawItemsReceivedReport(data);
+    case 'out-of-stock':
+        return buildOutOfStockReport(data);
     case 'transfer-history':
         return buildTransferHistoryReport(data);
     case 'expenses-summary':
