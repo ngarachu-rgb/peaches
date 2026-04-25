@@ -152,7 +152,7 @@ async function buildDirectSalesDeductionPlan(context, repositories, inventoryRow
 
         // Measured direct-sales items (shots / glasses) are already deducted from store
         // when stock is issued into shift stock. Do not deduct them again at shift close.
-        if (isMeasuredRecipeProductName(row.name)) {
+        if (row.saleMode === 'measured' || isMeasuredRecipeProductName(row.name)) {
             continue;
         }
 
