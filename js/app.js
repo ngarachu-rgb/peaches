@@ -1423,6 +1423,15 @@ async function loadStockReceipts() {
     });
     state.stockReceipts = shiftRows;
     const canDelete = canDeleteStockHistory();
+    const historyTotalNode = document.getElementById('stockReceiptHistoryTotal');
+    const shiftReceiptTotal = shiftRows.reduce((sum, row) => {
+        const meta = materialMetaMap.get(String(row.material_name || '').trim().toLowerCase());
+        const totalReceivedCost = row.total_received_cost ?? (toNumber(row.qty_received) * toNumber(row.buy_unit_price ?? meta?.buyUnitPrice));
+        return sum + toNumber(totalReceivedCost);
+    }, 0);
+    if (historyTotalNode) {
+        historyTotalNode.innerText = `Shift Received Total: KES ${formatMoney(shiftReceiptTotal)}`;
+    }
 
     document.getElementById('stockReceiptsBody').innerHTML = shiftRows.length ? shiftRows.map((row) => `
         <tr>
@@ -2381,10 +2390,12 @@ function renderStockTransferView() {
 
 function renderStockReceiptBatchInputs() {
     const body = document.getElementById('stockReceiptBatchBody');
+    const totalNode = document.getElementById('stockReceiptBatchTotal');
     if (!body) return;
 
     if (!state.rawMaterials.length) {
         body.innerHTML = '<tr><td colspan="4" style="padding:18px; color:#64748b; text-align:center;">No stock items available yet.</td></tr>';
+        if (totalNode) totalNode.innerText = 'Receipt Total: KES 0.00';
         return;
     }
 
@@ -2460,6 +2471,13 @@ function renderStockReceiptBatchInputs() {
             </tr>
         `;
     }).join('');
+
+    const batchTotal = state.stockReceiptDrafts.reduce((sum, draft) => (
+        sum + toNumber(draft.totalReceivedCost)
+    ), 0);
+    if (totalNode) {
+        totalNode.innerText = `Receipt Total: KES ${formatMoney(batchTotal)}`;
+    }
 }
 
 function getFinanceInputs() {
