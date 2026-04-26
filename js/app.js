@@ -1651,6 +1651,10 @@ function renderKitchen() {
     `).join('') || '<tr><td colspan="2">No production yet</td></tr>';
 }
 
+function shouldDisplaySalesItem(item) {
+    return toNumber(item?.bbf) > 0 || toNumber(item?.added_today) > 0;
+}
+
 function recalculateSalesTotals() {
     let total = 0;
     document.querySelectorAll('#salesBody .sales-input').forEach((input) => {
@@ -1711,12 +1715,14 @@ function renderSales() {
     const directSalesMode = isDirectSalesMode();
     updateSalesTableHeaders();
 
-    if (!state.items.length) {
-        body.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:30px;">No products found. Add items in Finished Products.</td></tr>';
+    const visibleItems = (state.items || []).filter((item) => shouldDisplaySalesItem(item));
+
+    if (!visibleItems.length) {
+        body.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:30px;">No items with opening stock or added stock for this shift.</td></tr>';
         return;
     }
 
-      body.innerHTML = state.items.map((item) => {
+      body.innerHTML = visibleItems.map((item) => {
           const totalAvailable = directSalesMode
               ? toNumber(item.available_stock ?? (toNumber(item.bbf) + toNumber(item.added_today)))
               : toNumber(item.bbf) + toNumber(item.added_today);
@@ -2527,7 +2533,7 @@ function getFinanceInputs() {
 
 function collectClosingRows() {
     if (isDirectSalesMode()) {
-        return Array.from(document.querySelectorAll('#salesBody .sales-input')).map((input) => {
+        const visibleRows = Array.from(document.querySelectorAll('#salesBody .sales-input')).map((input) => {
             const item = state.items.find((entry) => String(entry.product_id) === String(input.dataset.productId));
             const rawValue = String(input.value ?? '').trim();
             const openingQty = toNumber(input.dataset.openingQty);
@@ -2552,9 +2558,31 @@ function collectClosingRows() {
                 lineTotal: Math.max(0, openingQty + addedQty - issuedQty - closingQty) * toNumber(item?.price)
             };
         });
+
+        const hiddenZeroRows = (state.items || [])
+            .filter((item) => !shouldDisplaySalesItem(item))
+            .map((item) => ({
+                shiftRowId: item.id || '',
+                productId: item.product_id,
+                name: item?.name || 'Item',
+                hasClosingEntry: true,
+                openingQty: toNumber(item.bbf),
+                producedQty: toNumber(item.added_today),
+                receivedQty: 0,
+                transferredOutQty: toNumber(item.issued_qty),
+                transferredInQty: 0,
+                spoiltQty: 0,
+                closingQty: 0,
+                saleMode: item?.sale_mode || 'full',
+                soldQty: Math.max(0, toNumber(item.bbf) + toNumber(item.added_today) - toNumber(item.issued_qty)),
+                unitPrice: toNumber(item?.price),
+                lineTotal: Math.max(0, toNumber(item.bbf) + toNumber(item.added_today) - toNumber(item.issued_qty)) * toNumber(item?.price)
+            }));
+
+        return [...visibleRows, ...hiddenZeroRows];
     }
 
-    return Array.from(document.querySelectorAll('#salesBody .sales-input')).map((input) => {
+    const visibleRows = Array.from(document.querySelectorAll('#salesBody .sales-input')).map((input) => {
         const item = state.items.find((entry) => String(entry.product_id) === String(input.dataset.productId));
         const soldQty = calculateSoldQty({
             openingQty: input.dataset.openingQty,
@@ -2578,6 +2606,27 @@ function collectClosingRows() {
             lineTotal: soldQty * toNumber(item?.price)
         };
     });
+
+    const hiddenZeroRows = (state.items || [])
+        .filter((item) => !shouldDisplaySalesItem(item))
+        .map((item) => ({
+            shiftRowId: item.id || '',
+            productId: item.product_id,
+            name: item?.name || 'Item',
+            hasClosingEntry: true,
+            openingQty: toNumber(item.bbf),
+            producedQty: toNumber(item.added_today),
+            receivedQty: 0,
+            transferredOutQty: 0,
+            transferredInQty: 0,
+            spoiltQty: toNumber(item?.spoilt),
+            closingQty: 0,
+            soldQty: 0,
+            unitPrice: toNumber(item?.price),
+            lineTotal: 0
+        }));
+
+    return [...visibleRows, ...hiddenZeroRows];
 }
 
 function validateFinanceLines() {
