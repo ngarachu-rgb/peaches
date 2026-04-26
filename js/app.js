@@ -19,6 +19,7 @@ let rawImportRows = [];
 let productImportRows = [];
 let recipeImportRows = [];
 let currentAuditReport = null;
+let appToastTimer = null;
 
 const NAV_BUTTONS = {
     salesPage: 'navSales',
@@ -62,6 +63,30 @@ function toDateOnly(value = new Date()) {
 function handleError(error, message = 'Something went wrong') {
     console.error(error);
     alert(error?.message || message);
+}
+
+function showAppToast(message, type = 'success') {
+    const toast = document.getElementById('appToast');
+    if (!toast) {
+        alert(message);
+        return;
+    }
+
+    if (appToastTimer) {
+        clearTimeout(appToastTimer);
+        appToastTimer = null;
+    }
+
+    toast.innerText = String(message || '').trim() || 'Done.';
+    toast.className = `app-toast ${type}`;
+
+    requestAnimationFrame(() => {
+        toast.classList.add('show');
+    });
+
+    appToastTimer = setTimeout(() => {
+        toast.classList.remove('show');
+    }, 2400);
 }
 
 function getDraftedClosingQty(productId, fallback = 0) {
@@ -3144,7 +3169,7 @@ window.saveSellingProduct = async () => {
         const { error } = await repositories.saveProduct(getScope(), { name, price, category }, id);
         if (error) throw error;
 
-        alert('Product saved successfully!');
+        showAppToast('Product saved successfully!');
         window.resetProductForm();
         await loadInventory();
         updateDropdowns();
@@ -3162,7 +3187,7 @@ window.deleteSellingProduct = async (id) => {
         const scope = getScope();
         const { error } = await repositories.deactivateProduct(scope, id);
         if (error) throw error;
-        alert('Product deactivated successfully.');
+        showAppToast('Product deactivated successfully.');
         await loadInventory();
         updateDropdowns();
     } catch (error) {
@@ -3211,7 +3236,7 @@ window.saveMasterRecipe = async () => {
 
         const { error } = await repositories.upsertRecipes(getScope(), batch);
         if (error) throw error;
-        alert('Recipe updated successfully');
+        showAppToast('Recipe updated successfully');
         await loadRecipes();
         window.resetRecipeForm();
     } catch (error) {
@@ -3322,7 +3347,7 @@ window.processReverseDispatch = async () => {
         renderKitchenBatchInputs();
         await loadInventory();
         await loadKitchenData();
-        alert('Production posted successfully');
+        showAppToast('Production posted successfully');
     } catch (error) {
         handleError(error, 'Failed to post production');
     } finally {
@@ -3428,7 +3453,7 @@ window.processStockReceipt = async () => {
 
         state.stockReceiptDrafts = [createStockReceiptDraft()];
         renderStockReceiptBatchInputs();
-        alert(`Recorded ${populatedRows.length} stock receipt${populatedRows.length === 1 ? '' : 's'} successfully.`);
+        showAppToast(`Recorded ${populatedRows.length} stock receipt${populatedRows.length === 1 ? '' : 's'} successfully.`);
         await loadStockReceipts();
         await loadRawMaterials();
         updateDropdowns();
@@ -3538,7 +3563,7 @@ window.processStockTransfer = async () => {
         await loadStockTransfers();
         updateDropdowns();
         renderStoreStockLevels();
-        alert(`Recorded ${populatedRows.length} stock transfer${populatedRows.length === 1 ? '' : 's'} successfully.`);
+        showAppToast(`Recorded ${populatedRows.length} stock transfer${populatedRows.length === 1 ? '' : 's'} successfully.`);
     } catch (error) {
         handleError(error, 'Failed to transfer stock');
     } finally {
@@ -3713,7 +3738,7 @@ window.processBarIssue = async () => {
         await loadRawMaterials();
         await loadInventory();
         updateDropdowns();
-        alert(`Recorded ${populatedRows.length} bar issue${populatedRows.length === 1 ? '' : 's'} successfully.`);
+        showAppToast(`Recorded ${populatedRows.length} bar issue${populatedRows.length === 1 ? '' : 's'} successfully.`);
     } catch (error) {
         handleError(error, 'Failed to record issue to shots');
     } finally {
@@ -3759,7 +3784,7 @@ window.deleteStockReceiptHistory = async (receiptId) => {
             renderStoreStockLevels();
         }
         updateDropdowns();
-        alert('Stock receipt deleted and stock reversed.');
+        showAppToast('Stock receipt deleted and stock reversed.');
     } catch (error) {
         handleError(error, 'Failed to delete stock receipt');
     }
@@ -3806,7 +3831,7 @@ window.deleteStockTransferHistory = async (transferId) => {
             renderStoreStockLevels();
         }
         updateDropdowns();
-        alert('Stock transfer deleted and stock reversed.');
+        showAppToast('Stock transfer deleted and stock reversed.');
     } catch (error) {
         handleError(error, 'Failed to delete stock transfer');
     }
@@ -3890,7 +3915,7 @@ window.deleteBarIssueHistory = async (issueId) => {
         await loadRawMaterials();
         await loadInventory();
         updateDropdowns();
-        alert('Issue record deleted and stock reversed.');
+        showAppToast('Issue record deleted and stock reversed.');
     } catch (error) {
         handleError(error, 'Failed to delete stock issue');
     }
@@ -3933,7 +3958,7 @@ window.finalizeShift = async () => {
         setReportDateRange(closedShiftDate, closedShiftDate);
         await window.showPage('reportsPage');
         await window.loadShiftReport();
-        alert(`Shift closed successfully. Recorded sales: KES ${formatMoney(finance.totalSales)}.`);
+        showAppToast(`Shift closed successfully. Recorded sales: KES ${formatMoney(finance.totalSales)}.`);
     } catch (error) {
         handleError(error, 'Shift close failed');
     } finally {
@@ -4048,7 +4073,7 @@ window.saveRawMaterial = async () => {
         );
         if (error) throw error;
 
-        alert(id ? 'Material Updated!' : 'Material Added!');
+        showAppToast(id ? 'Material Updated!' : 'Material Added!');
         window.resetRawForm();
         await loadRawMaterials();
         updateDropdowns();
@@ -4294,7 +4319,7 @@ window.saveStaffUser = async () => {
                 isActive
             });
             if (error) throw error;
-            alert('Staff profile updated.');
+            showAppToast('Staff profile updated.');
         } else {
             if (password) {
                 throw new Error('Automatic staff creation is still paused. Create the Auth user manually in Supabase, then update the profile here.');
@@ -4325,7 +4350,7 @@ window.changeMyPassword = async () => {
 
         document.getElementById('newPassword').value = '';
         document.getElementById('confirmPassword').value = '';
-        alert('Password updated successfully.');
+        showAppToast('Password updated successfully.');
     } catch (error) {
         handleError(error, 'Failed to update password');
     } finally {
@@ -4377,7 +4402,7 @@ window.deleteRawMaterial = async (id) => {
         requirePermission(PERMISSIONS.MANAGE_RAW_MATERIALS);
         const { error } = await repositories.deleteRawMaterial(getScope(), id);
         if (error) throw error;
-        alert('Raw material deleted successfully.');
+        showAppToast('Raw material deleted successfully.');
         window.resetRawForm();
         await loadRawMaterials();
         updateDropdowns();
