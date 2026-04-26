@@ -1970,7 +1970,9 @@ function buildShiftRecallRows(shiftInventoryRows, products, options = {}) {
             const product = productMap.get(String(row.product_id));
             const productName = product?.name || `Unknown Product (${String(row.product_id || '').slice(0, 8)})`;
             const displayName = getDisplayProductName(productName);
-            const price = toNumber(product?.price);
+            const savedUnitPrice = toNumber(row.unit_price);
+            const savedLineTotal = toNumber(row.line_total);
+            const price = savedUnitPrice > 0 ? savedUnitPrice : toNumber(product?.price);
             let opening = toNumber(row.bbf);
             let added = toNumber(row.added_today);
             let closing = toNumber(row.close_qty);
@@ -1995,18 +1997,18 @@ function buildShiftRecallRows(shiftInventoryRows, products, options = {}) {
                 closing,
                 sold: soldQty,
                 price,
-                total: soldQty * price
+                total: (savedLineTotal > 0 || soldQty === 0) ? savedLineTotal : soldQty * price
             };
         })
         .sort((left, right) => left.item.localeCompare(right.item));
 }
 
-function renderShiftRecallTable(rows) {
+function renderShiftRecallTable(rows, options = {}) {
     if (!rows.length) {
         return '<div style="padding:20px; color:#64748b; text-align:center; border:1px solid #e2e8f0; border-radius:10px;">No item rows were found for this shift.</div>';
     }
 
-    const totalSales = rows.reduce((sum, row) => sum + toNumber(row.total), 0);
+    const totalSales = toNumber(options.savedTotalSales) || rows.reduce((sum, row) => sum + toNumber(row.total), 0);
 
     return `
         <div style="overflow-x:auto;">
@@ -2545,13 +2547,20 @@ function collectClosingRows() {
                 spoiltQty: 0,
                 closingQty,
                 saleMode: item?.sale_mode || 'full',
-                soldQty: Math.max(0, openingQty + addedQty - issuedQty - closingQty)
+                soldQty: Math.max(0, openingQty + addedQty - issuedQty - closingQty),
+                unitPrice: toNumber(item?.price),
+                lineTotal: Math.max(0, openingQty + addedQty - issuedQty - closingQty) * toNumber(item?.price)
             };
         });
     }
 
     return Array.from(document.querySelectorAll('#salesBody .sales-input')).map((input) => {
         const item = state.items.find((entry) => String(entry.product_id) === String(input.dataset.productId));
+        const soldQty = calculateSoldQty({
+            openingQty: input.dataset.openingQty,
+            producedQty: input.dataset.producedQty,
+            closingQty: input.value
+        });
         return {
             shiftRowId: input.dataset.shiftRowId,
             productId: input.dataset.productId,
@@ -2563,7 +2572,10 @@ function collectClosingRows() {
             transferredOutQty: 0,
             transferredInQty: 0,
             spoiltQty: toNumber(item?.spoilt),
-            closingQty: toNumber(input.value)
+            closingQty: toNumber(input.value),
+            soldQty,
+            unitPrice: toNumber(item?.price),
+            lineTotal: soldQty * toNumber(item?.price)
         };
     });
 }
@@ -4591,7 +4603,7 @@ window.viewShiftDetail = async (shiftId) => {
                 </div>
                 ${buildShiftRecallSummaryCards(shift, shiftLabel)}
                 <div style="margin-bottom:12px; font-size:12px; color:#64748b; text-transform:uppercase; letter-spacing:0.04em; font-weight:700;">Item Detail</div>
-                ${renderShiftRecallTable(recallRows)}
+                ${renderShiftRecallTable(recallRows, { savedTotalSales: shift.total_sales })}
                 <div style="margin-top:12px; font-size:12px; color:#64748b;">
                     Use this view to inspect opening, added, closing, sold, price, and total for each item in the selected shift.
                 </div>

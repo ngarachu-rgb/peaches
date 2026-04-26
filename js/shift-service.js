@@ -334,7 +334,9 @@ async function closeDirectSalesShift(context, repositories, currentShift, payloa
                 bbf: row.openingQty,
                 added_today: row.producedQty,
                 close_qty: row.closingQty,
-                sold_qty: row.soldQty
+                sold_qty: row.soldQty,
+                unit_price: toNumber(row.unitPrice),
+                line_total: toNumber(row.lineTotal)
             };
 
             if (row.shiftRowId) nextRow.id = row.shiftRowId;
@@ -750,7 +752,9 @@ export async function closeShiftWithCarryForward(context, repositories, currentS
                 bbf: row.openingQty,
                 added_today: row.producedQty,
                 close_qty: row.closingQty,
-                sold_qty: row.soldQty
+                sold_qty: row.soldQty,
+                unit_price: toNumber(row.unitPrice),
+                line_total: toNumber(row.lineTotal)
             };
 
             if (row.shiftRowId) nextRow.id = row.shiftRowId;

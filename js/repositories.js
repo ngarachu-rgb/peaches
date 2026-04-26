@@ -59,6 +59,8 @@ const LEGACY_SHIFT_INVENTORY_COLUMNS = [
     'added_today',
     'close_qty',
     'sold_qty',
+    'unit_price',
+    'line_total',
     'created_at'
 ].join(', ');
 
@@ -98,7 +100,9 @@ function sanitizeShiftInventoryPayload(payload = {}) {
         'bbf',
         'added_today',
         'close_qty',
-        'sold_qty'
+        'sold_qty',
+        'unit_price',
+        'line_total'
     ]);
 
     const nextPayload = {};
