@@ -1289,7 +1289,7 @@ async function loadInventory() {
         const addedQty = isDirectMode
             ? (measuredItem
                 ? toNumber(shiftRow?.added_today)
-                : Math.max(availableQty + issuedOutQty - openingQty, 0))
+                : (availableQty + issuedOutQty - openingQty))
             : toNumber(shiftRow?.added_today);
         return {
             id: shiftRow?.id || null,
