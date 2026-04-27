@@ -156,6 +156,37 @@
             }
         }
 
+        .app-toast {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            min-width: 280px;
+            max-width: min(92vw, 520px);
+            padding: 16px 22px;
+            border-radius: 12px;
+            color: #ffffff;
+            font-weight: 700;
+            text-align: center;
+            box-shadow: 0 14px 30px rgba(0,0,0,0.22);
+            z-index: 5000;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s ease, transform 0.2s ease;
+        }
+        .app-toast.show {
+            opacity: 1;
+            transform: translate(-50%, -50%) scale(1);
+        }
+        .app-toast.success {
+            background: rgba(17, 94, 89, 0.96);
+            border: 2px solid #99f6e4;
+        }
+        .app-toast.error {
+            background: rgba(153, 27, 27, 0.96);
+            border: 2px solid #fecaca;
+        }
+
 </style>
 </head>
 <body>
@@ -209,6 +240,7 @@
 </nav>
 
 <main>
+<div id="appToast" class="app-toast" aria-live="polite"></div>
 <div id="salesPage" class="page active">
     <div class="card">
         <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px;">
@@ -616,7 +648,7 @@
     <div id="stocksPage" class="page">
         <div class="card">
             <div style="display:flex; gap:10px; flex-wrap:wrap;">
-                <button id="stocksViewReceiptsBtn" class="btn" type="button" onclick="switchStocksView('receipts')" style="background:#7092ae; color:white;">Receive Drinks</button>
+                <button id="stocksViewReceiptsBtn" class="btn" type="button" onclick="switchStocksView('receipts')" style="background:#7092ae; color:white;">Receive Items</button>
                 <button id="stocksViewLevelsBtn" class="btn" type="button" onclick="switchStocksView('levels')" style="background:#edf2f7; color:#2d3748;">Stock Levels</button>
                 <button id="stocksViewIssuesBtn" class="btn hidden" type="button" onclick="switchStocksView('issues')" style="background:#edf2f7; color:#2d3748;">Issue To Shots</button>
                 <button id="stocksViewTransfersBtn" class="btn" type="button" onclick="switchStocksView('transfers')" style="background:#edf2f7; color:#2d3748;">Transfers</button>
@@ -625,7 +657,7 @@
 
         <div id="stocksReceiptsView">
         <div class="card">
-            <h2>Receive Drinks</h2>
+            <h2>Receive Items</h2>
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
                 <div style="color:#740515; font-size:18px;">Add one or more drink receipts, then post them together.</div>
                 <button class="btn" type="button" onclick="addStockReceiptLine()">Add Receipt Line</button>
