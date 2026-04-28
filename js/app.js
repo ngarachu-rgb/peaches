@@ -794,7 +794,7 @@ function updateRawMaterialNameHint() {
     const editingId = String(idField.value || '');
 
     if (!typedName) {
-        hint.innerText = 'Start typing to check whether this material name already exists.';
+        hint.innerText = 'Start typing to check whether this item name already exists.';
         hint.style.color = '#64748b';
         return;
     }
@@ -2360,7 +2360,7 @@ function renderStockTransferView() {
                             name="stockTransferMaterial${index}"
                             list="stockTransferMaterialList${index}"
                             value="${inputValue}"
-                            placeholder="Start typing drink"
+                            placeholder="Start typing item"
                             autocomplete="off"
                             oninput="updateStockTransferDraftRow(${index}, 'materialSearch', this.value)"
                             onchange="selectStockTransferMaterial(${index}, this.value)">
@@ -2471,7 +2471,7 @@ function renderStockReceiptBatchInputs() {
                         name="stockReceiptMaterial${index}"
                         list="stockReceiptMaterialList${index}"
                         value="${inputValue}"
-                        placeholder="Start typing drink name"
+                        placeholder="Start typing item name"
                         autocomplete="off"
                         oninput="updateStockReceiptDraft(${index}, 'materialSearch', this.value)"
                         onchange="selectStockReceiptMaterial(${index}, this.value)">
