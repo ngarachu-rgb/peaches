@@ -225,6 +225,70 @@
             }
         }
 
+        .raw-entry-shell {
+            display: grid;
+            grid-template-columns: repeat(7, minmax(110px, 1fr));
+            gap: 0;
+            border-top: 2px solid #1f2937;
+            margin-top: 6px;
+        }
+        .raw-entry-label {
+            padding: 8px 6px 4px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            color: #111827;
+            text-align: center;
+        }
+        .raw-entry-cell {
+            padding: 0;
+            border-top: 1px solid #1f2937;
+            border-right: 1px solid #1f2937;
+            background: #ffffff;
+        }
+        .raw-entry-cell:first-of-type {
+            border-left: 1px solid #1f2937;
+        }
+        .raw-entry-cell input {
+            border: none;
+            border-radius: 0;
+            min-height: 42px;
+            background: transparent;
+            box-shadow: none;
+        }
+        .raw-entry-save {
+            display: flex;
+            justify-content: center;
+            margin-top: 10px;
+        }
+        .raw-entry-save .btn {
+            min-width: 180px;
+            padding: 10px 18px;
+        }
+
+        @media (max-width: 1024px) {
+            .raw-entry-shell {
+                grid-template-columns: repeat(2, minmax(160px, 1fr));
+                gap: 10px;
+                border-top: none;
+            }
+            .raw-entry-label {
+                text-align: left;
+                padding: 0 0 4px;
+            }
+            .raw-entry-cell {
+                border: 1px solid #cbd5e1;
+                border-radius: 6px;
+            }
+            .raw-entry-cell:first-of-type {
+                border-left: 1px solid #cbd5e1;
+            }
+            .raw-entry-cell input {
+                min-height: 38px;
+                border-radius: 6px;
+            }
+        }
+
 </style>
 </head>
 <body>
@@ -534,49 +598,52 @@
 </div>
 
     <div id="storePage" class="page">
-        <div class="card" style="border-left: 5px solid #7092ae;"> <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <h2 style="font-size: 2em; font-weight: bold;">Raw Materials Master</h2>
+        <div class="card" style="border-left: 5px solid #7092ae; padding-top: 14px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <h2 style="font-size: 2em; font-weight: bold; margin: 0;">Raw Materials Master</h2>
             </div>
             
-            <div id="rawMaterialFormCard" style="background: #edf2f7; padding: 16px; border-radius: 8px; margin-bottom: 22px;">
-                <h4 id="rawFormTitle" style="margin-top:0;">Add New Raw Material</h4>
-                <input type="hidden" id="rawMaterialId"> <div class="recon-grid" style="grid-template-columns: minmax(220px, 2fr) repeat(5, minmax(105px, 1fr)) minmax(140px, 1fr); gap: 10px; align-items: end;">
-                    <div>
-                        <label style="font-size: 12px; color: #666;">Material Code</label>
+            <div id="rawMaterialFormCard" style="background: #edf2f7; padding: 14px 16px 12px; border-radius: 8px; margin-bottom: 18px;">
+                <h4 id="rawFormTitle" style="margin:0 0 10px 0; text-transform:uppercase; font-size:18px;">Add New Raw Material</h4>
+                <input type="hidden" id="rawMaterialId">
+                <div class="raw-entry-shell">
+                    <div class="raw-entry-label">Material Code</div>
+                    <div class="raw-entry-label">Material Name</div>
+                    <div class="raw-entry-label">Buying Unit</div>
+                    <div class="raw-entry-label">Store Unit</div>
+                    <div class="raw-entry-label">Conv. Factor</div>
+                    <div class="raw-entry-label">Buying Price</div>
+                    <div class="raw-entry-label">R.O.L</div>
+
+                    <div class="raw-entry-cell">
                         <input type="text" id="rawCode" name="rawCode" placeholder="e.g. RM-FLOUR">
                     </div>
-                    <div>
-                        <label style="font-size: 12px; color: #666;">Material Name</label>
+                    <div class="raw-entry-cell">
                         <input type="text" id="rawName" name="rawName" placeholder="e.g. Flour" list="rawNameSuggestions" oninput="checkRawMaterialNameMatch()">
                         <datalist id="rawNameSuggestions"></datalist>
-                        <div id="rawNameHint" style="font-size:11px; color:#64748b; margin-top:6px; min-height:16px;">Start typing to check whether this material name already exists.</div>
+                        <div id="rawNameHint" style="font-size:11px; color:#64748b; margin-top:4px; min-height:16px;"></div>
                     </div>
-                    <div>
-                        <label style="font-size: 12px; color: #666;">Buying Unit</label>
+                    <div class="raw-entry-cell">
                         <input type="text" id="buyUnit" name="buyUnit" placeholder="e.g. Bales">
                     </div>
-                    <div>
-                        <label style="font-size: 12px; color: #666;">Store/Recipe Unit</label>
+                    <div class="raw-entry-cell">
                         <input type="text" id="storeUnit" name="storeUnit" placeholder="e.g. KG">
                     </div>
-                    <div>
-                        <label style="font-size: 12px; color: #666;">Conv. Factor</label>
+                    <div class="raw-entry-cell">
                         <input type="number" id="convFactor" name="convFactor" placeholder="e.g. 12" value="1">
                     </div>
-                    <div>
-                        <label style="font-size: 12px; color: #666;">Buying Price</label>
+                    <div class="raw-entry-cell">
                         <input type="number" id="buyPrice" name="buyPrice" placeholder="0.00">
                     </div>
-                    <div>
-                        <label style="font-size: 12px; color: #666;">Reorder Level</label>
+                    <div class="raw-entry-cell">
                         <input type="number" id="reorderLevel" name="reorderLevel" min="0" step="0.01" placeholder="e.g. 20">
                     </div>
-                    <div style="display: flex; align-items: flex-end; gap: 10px;">
-                        <button class="btn" id="saveRawBtn" onclick="saveRawMaterial()" style="background:#7092ae; color:white; flex:1;">Save Material</button>
-                        <button class="btn" id="cancelRawBtn" style="background:#95a5a6; color:white; display:none;" onclick="resetRawForm()">Cancel</button>
-                    </div>
                 </div>
-                <p style="font-size:11px; color:#7f8c8d; margin-top:10px; margin-bottom:0;">
+                <div class="raw-entry-save">
+                    <button class="btn" id="saveRawBtn" onclick="saveRawMaterial()" style="background:#7092ae; color:white;">Save Material</button>
+                    <button class="btn" id="cancelRawBtn" style="background:#95a5a6; color:white; display:none; margin-left:10px;" onclick="resetRawForm()">Cancel</button>
+                </div>
+                <p style="font-size:11px; color:#7f8c8d; margin-top:8px; margin-bottom:0;">
                     Calculation: Store Unit Cost = Buy Price / Conv. Factor. (e.g. Buying 1 Bale (12x1KG Pkts) @ 1740. Store Unit Cost = 1740/12 = 145/KG)
                 </p>
             </div>
