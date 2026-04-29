@@ -33,6 +33,8 @@ const NAV_BUTTONS = {
     accountPage: 'navAccount'
 };
 
+const SHOW_STARTUP_IMPORT_TOOLS = false;
+
 function toNumber(value) {
     const normalized = Number(value);
     return Number.isFinite(normalized) ? normalized : 0;
@@ -407,7 +409,7 @@ function applyMasterPageModes() {
     }
 
     if (finishedImportCard) {
-        finishedImportCard.classList.toggle('hidden', !canManageProducts);
+        finishedImportCard.classList.toggle('hidden', !canManageProducts || !SHOW_STARTUP_IMPORT_TOOLS);
     }
 
     if (rawMaterialFormCard) {
@@ -416,7 +418,7 @@ function applyMasterPageModes() {
     }
 
     if (rawImportCard) {
-        rawImportCard.classList.toggle('hidden', !canImportRawMaterials);
+        rawImportCard.classList.toggle('hidden', !canImportRawMaterials || !SHOW_STARTUP_IMPORT_TOOLS);
     }
 
     if (matrixEditorCard) {
@@ -425,7 +427,7 @@ function applyMasterPageModes() {
     }
 
     if (matrixImportCard) {
-        matrixImportCard.classList.toggle('hidden', !canManageRecipes);
+        matrixImportCard.classList.toggle('hidden', !canManageRecipes || !SHOW_STARTUP_IMPORT_TOOLS);
     }
 }
 
