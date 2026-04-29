@@ -1338,8 +1338,8 @@ async function loadRawMaterials() {
                 <td>${material.reorder_level !== undefined && material.reorder_level !== null && material.reorder_level !== '' ? `${formatQuantity(material.reorder_level)} ${material.store_unit || ''}`.trim() : '--'}</td>
                 <td style="text-align: right;">
                     ${canManageRawMaterials ? `
-                        <button class="btn" style="background:#edf2f7; margin-right:8px;" onclick="editRawMaterial('${material.id}')">Edit</button>
-                        <button class="btn" style="background:#e74c3c; color:white;" onclick="deleteRawMaterial('${material.id}')">Delete</button>
+                        <button class="btn compact-btn" style="background:#edf2f7;" onclick="editRawMaterial('${material.id}')">Edit</button>
+                        <button class="btn compact-btn" style="background:#e74c3c; color:white;" onclick="deleteRawMaterial('${material.id}')">Delete</button>
                     ` : '--'}
                 </td>
             </tr>

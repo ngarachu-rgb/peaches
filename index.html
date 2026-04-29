@@ -187,6 +187,44 @@
             border: 2px solid #fecaca;
         }
 
+        #rawMaterialsTable {
+            table-layout: fixed;
+        }
+        #rawMaterialsTable th,
+        #rawMaterialsTable td {
+            padding: 5px 8px;
+            font-size: 12px;
+            line-height: 1.15;
+            vertical-align: middle;
+        }
+        #rawMaterialsTable th {
+            font-size: 11px;
+        }
+        #rawMaterialsTable td:last-child {
+            white-space: nowrap;
+        }
+        #rawMaterialsTable .compact-btn {
+            padding: 4px 8px;
+            font-size: 11px;
+            line-height: 1.1;
+            margin-right: 4px;
+        }
+
+        @media (max-width: 768px) {
+            #rawMaterialsTable th,
+            #rawMaterialsTable td {
+                padding: 4px 6px;
+                font-size: 10.5px;
+            }
+            #rawMaterialsTable th {
+                font-size: 10px;
+            }
+            #rawMaterialsTable .compact-btn {
+                padding: 3px 6px;
+                font-size: 10px;
+            }
+        }
+
 </style>
 </head>
 <body>
@@ -584,7 +622,7 @@
                     </div>
                 </div>
             </div>
-            <table>
+            <table id="rawMaterialsTable">
                 <thead>
                     <tr>
                         <th style="color: #7092ae; background: none;">NAME</th>
