@@ -28,6 +28,7 @@ export const state = {
         mpesaClosing: '',
         mpesaWithdraw: '',
         cashAtHand: '',
+        notes: '',
         expenseLines: [],
         debtGivenLines: [],
         debtPaidLines: []
@@ -132,6 +133,7 @@ export function resetAppState() {
         mpesaClosing: '',
         mpesaWithdraw: '',
         cashAtHand: '',
+        notes: '',
         expenseLines: [],
         debtGivenLines: [],
         debtPaidLines: []

@@ -187,6 +187,13 @@
             border: 2px solid #fecaca;
         }
 
+        .auto-grow-textarea {
+            resize: none;
+            overflow: hidden;
+            min-height: 42px;
+            line-height: 1.4;
+        }
+
         #rawMaterialsTable {
             table-layout: fixed;
         }
@@ -588,6 +595,11 @@
             <div class="stat-box" style="background:#f0fdf4"><div class="stat-label">Income from Sales</div><div id="incomeFromSales" class="stat-val">0.00</div></div>
             <div class="stat-box" style="background:#fff7ed"><div class="stat-label">Sales from Items</div><div id="totalSalesVal" class="stat-val">0.00</div></div>
             <div class="stat-box"><div class="stat-label">Variance</div><div id="varianceVal" class="stat-val" style="color:red">0.00</div></div>
+        </div>
+
+        <div style="margin-top:20px;">
+            <div class="stat-label" style="margin-bottom:6px;">Reconciliation Notes</div>
+            <textarea id="financeNotes" name="financeNotes" rows="1" class="auto-grow-textarea" placeholder="Add closing notes for this shift..." oninput="handleFinanceNotesInput(this)"></textarea>
         </div>
 
         <div style="display: flex; gap: 10px; margin-top: 20px;">

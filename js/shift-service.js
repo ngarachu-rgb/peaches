@@ -357,7 +357,8 @@ async function closeDirectSalesShift(context, repositories, currentShift, payloa
             total_debts: finance.debtGiven,
             debts_collected: finance.prevDebtsPaid,
             variance: finance.variance,
-            closed_by: payload.closedBy
+            closed_by: payload.closedBy,
+            reconciliation_notes: finance.notes || ''
         });
         if (closeResult.error) throw closeResult.error;
         closedShift = closeResult.data;
@@ -375,7 +376,8 @@ async function closeDirectSalesShift(context, repositories, currentShift, payloa
             total_debts: 0,
             debts_collected: 0,
             variance: null,
-            closed_by: null
+            closed_by: null,
+            reconciliation_notes: ''
         });
         if (nextShiftResult.error) throw nextShiftResult.error;
         nextShift = nextShiftResult.data;
@@ -775,7 +777,8 @@ export async function closeShiftWithCarryForward(context, repositories, currentS
             total_debts: finance.debtGiven,
             debts_collected: finance.prevDebtsPaid,
             variance: finance.variance,
-            closed_by: payload.closedBy
+            closed_by: payload.closedBy,
+            reconciliation_notes: finance.notes || ''
         });
         if (closeResult.error) throw closeResult.error;
         closedShift = closeResult.data;
@@ -793,7 +796,8 @@ export async function closeShiftWithCarryForward(context, repositories, currentS
             total_debts: 0,
             debts_collected: 0,
             variance: null,
-            closed_by: null
+            closed_by: null,
+            reconciliation_notes: ''
         });
         if (nextShiftResult.error) throw nextShiftResult.error;
         nextShift = nextShiftResult.data;

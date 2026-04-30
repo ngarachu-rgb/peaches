@@ -79,7 +79,8 @@ function sanitizeShiftPayload(payload = {}) {
         'total_debts',
         'debts_collected',
         'variance',
-        'closed_by'
+        'closed_by',
+        'reconciliation_notes'
     ]);
 
     const nextPayload = {};
@@ -1379,7 +1380,7 @@ export function createRepositories(supabase) {
             return applyScope(
                 supabase
                     .from('shifts')
-                    .select(selectColumns('shifts', LEGACY_SHIFT_COLUMNS))
+                    .select('*')
                     .eq('id', shiftId),
                 'shifts',
                 context

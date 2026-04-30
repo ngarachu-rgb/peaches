@@ -44,6 +44,15 @@ function formatMoney(value) {
     return toNumber(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 function formatQuantity(value, maximumFractionDigits = 2) {
     return toNumber(value).toLocaleString(undefined, {
         minimumFractionDigits: 0,
@@ -310,10 +319,17 @@ function syncFinanceDraftFromDom() {
         mpesaClosing: document.getElementById('mpesaClosing')?.value || '',
         mpesaWithdraw: document.getElementById('mpesaWithdraw')?.value || '',
         cashAtHand: document.getElementById('cashAtHand')?.value || '',
+        notes: document.getElementById('financeNotes')?.value || '',
         expenseLines: state.financeDraft.expenseLines,
         debtGivenLines: state.financeDraft.debtGivenLines,
         debtPaidLines: state.financeDraft.debtPaidLines
     };
+}
+
+function autoResizeTextarea(textarea) {
+    if (!(textarea instanceof HTMLTextAreaElement)) return;
+    textarea.style.height = 'auto';
+    textarea.style.height = `${Math.max(textarea.scrollHeight, 42)}px`;
 }
 
 function setRawImportStatus(message, isError = false) {
@@ -441,6 +457,7 @@ function resetBranchScopedDrafts() {
         mpesaClosing: '',
         mpesaWithdraw: '',
         cashAtHand: '',
+        notes: '',
         expenseLines: [],
         debtGivenLines: [],
         debtPaidLines: []
@@ -796,7 +813,7 @@ function updateRawMaterialNameHint() {
     const editingId = String(idField.value || '');
 
     if (!typedName) {
-        hint.innerText = 'Start typing to check whether this item name already exists.';
+        hint.innerText = '';
         hint.style.color = '#64748b';
         return;
     }
@@ -1949,6 +1966,15 @@ function buildShiftRecallSummaryCards(shift, shiftLabel) {
         { label: 'Recorded At', value: formatShiftRecallDateTime(shift.created_at) }
     ];
 
+    const notesMarkup = String(shift.reconciliation_notes || '').trim()
+        ? `
+            <div style="margin-bottom:20px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:12px 14px;">
+                <div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:6px;">Reconciliation Notes</div>
+                <div style="font-size:14px; color:#1f2937; white-space:pre-wrap;">${escapeHtml(String(shift.reconciliation_notes || '').trim())}</div>
+            </div>
+        `
+        : '';
+
     return `
         <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:12px; margin-bottom:20px;">
             ${summaryItems.map((item) => `
@@ -1958,6 +1984,7 @@ function buildShiftRecallSummaryCards(shift, shiftLabel) {
                 </div>
             `).join('')}
         </div>
+        ${notesMarkup}
     `;
 }
 
@@ -2523,6 +2550,7 @@ function getFinanceInputs() {
         mpesaClosing: toNumber(document.getElementById('mpesaClosing').value || state.financeDraft.mpesaClosing),
         mpesaWithdraw: toNumber(document.getElementById('mpesaWithdraw').value || state.financeDraft.mpesaWithdraw),
         cashAtHand: toNumber(document.getElementById('cashAtHand').value || state.financeDraft.cashAtHand),
+        notes: String(document.getElementById('financeNotes')?.value || state.financeDraft.notes || '').trim(),
         totalExpenses: totals.totalExpenses,
         debtGiven: totals.totalDebtGiven,
         prevDebtsPaid: totals.totalDebtPaid,
@@ -2671,6 +2699,7 @@ function resetFinanceFieldsForShift() {
         mpesaClosing: '',
         mpesaWithdraw: '',
         cashAtHand: '',
+        notes: '',
         expenseLines: [createExpenseDraft()],
         debtGivenLines: [createDebtDraft()],
         debtPaidLines: [createDebtDraft()]
@@ -2679,6 +2708,11 @@ function resetFinanceFieldsForShift() {
     document.getElementById('mpesaClosing').value = '';
     document.getElementById('mpesaWithdraw').value = '';
     document.getElementById('cashAtHand').value = '';
+    const financeNotesInput = document.getElementById('financeNotes');
+    if (financeNotesInput) {
+        financeNotesInput.value = '';
+        autoResizeTextarea(financeNotesInput);
+    }
     renderFinanceLineItems();
     window.calcRecon();
 }
@@ -2691,6 +2725,7 @@ function primeNextShiftDraftState(carryOverride = null) {
         mpesaClosing: '',
         mpesaWithdraw: '',
         cashAtHand: '',
+        notes: '',
         expenseLines: [createExpenseDraft()],
         debtGivenLines: [createDebtDraft()],
         debtPaidLines: [createDebtDraft()]
@@ -2705,11 +2740,16 @@ function applyNextShiftFinanceReset(carryOverride = null) {
     const mpesaClosingInput = document.getElementById('mpesaClosing');
     const mpesaWithdrawInput = document.getElementById('mpesaWithdraw');
     const cashAtHandInput = document.getElementById('cashAtHand');
+    const financeNotesInput = document.getElementById('financeNotes');
 
     if (mpesaOpeningInput) mpesaOpeningInput.value = carry.mpesaBf || '';
     if (mpesaClosingInput) mpesaClosingInput.value = '';
     if (mpesaWithdrawInput) mpesaWithdrawInput.value = '';
     if (cashAtHandInput) cashAtHandInput.value = '';
+    if (financeNotesInput) {
+        financeNotesInput.value = '';
+        autoResizeTextarea(financeNotesInput);
+    }
 }
 
 function setReportDateRange(startDate, endDate = startDate) {
@@ -3175,6 +3215,12 @@ window.calcRecon = () => {
     const varianceEl = document.getElementById('varianceVal');
     varianceEl.innerText = formatMoney(variance);
     varianceEl.style.color = Math.abs(variance) < 0.01 ? 'green' : 'red';
+};
+
+window.handleFinanceNotesInput = (textarea) => {
+    autoResizeTextarea(textarea);
+    ensureFinanceDrafts();
+    state.financeDraft.notes = textarea?.value || '';
 };
 
 window.editSellingProduct = (id) => {
@@ -4087,6 +4133,11 @@ window.showPage = async (id) => {
             document.getElementById('mpesaClosing').value = state.financeDraft.mpesaClosing ?? '';
             document.getElementById('mpesaWithdraw').value = state.financeDraft.mpesaWithdraw ?? '';
               document.getElementById('cashAtHand').value = state.financeDraft.cashAtHand ?? '';
+              const financeNotesInput = document.getElementById('financeNotes');
+              if (financeNotesInput) {
+                  financeNotesInput.value = state.financeDraft.notes ?? '';
+                  autoResizeTextarea(financeNotesInput);
+              }
               renderFinanceLineItems();
               window.calcRecon();
           }
