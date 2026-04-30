@@ -884,6 +884,23 @@ export function createRepositories(supabase) {
             );
         },
 
+        updateRawMaterialStockLevel(context, id, stockLevel) {
+            const nextValue = toNumber(stockLevel);
+            return applyScope(
+                supabase
+                    .from('main_store')
+                    .update({
+                        stock_level: nextValue,
+                        current_stock: nextValue
+                    })
+                    .eq('id', id)
+                    .select(selectColumns('main_store', 'id, restaurant_id, branch_id, name, current_stock, stock_level'))
+                    .single(),
+                'main_store',
+                context
+            );
+        },
+
         async importRawMaterials(context, batch, existingMaterials = []) {
             const byName = new Map(
                 (existingMaterials || []).map((material) => [

@@ -1221,6 +1221,10 @@ function canDeleteStockHistory() {
     return [ROLES.DEVELOPER, ROLES.SYSTEM_ADMIN, ROLES.MANAGER].includes(state.role);
 }
 
+function canAdjustStockLevels() {
+    return [ROLES.DEVELOPER, ROLES.SYSTEM_ADMIN, ROLES.MANAGER].includes(state.role);
+}
+
 function isRecordInCurrentShiftWindow(row) {
     if (!row || !state.currentShift?.created_at) return false;
     if (row.shift_id && state.currentShift?.id) {
@@ -2127,7 +2131,12 @@ function getBarIssueConversion(sourceMaterialName, targetProductName) {
 
 function renderStoreStockLevels() {
     const body = document.getElementById('storeStockLevelsBody');
+    const actionHeader = document.getElementById('storeStockLevelsActionHeader');
     if (!body) return;
+    const showAdjustAction = canAdjustStockLevels();
+    if (actionHeader) {
+        actionHeader.classList.toggle('hidden', !showAdjustAction);
+    }
 
     const searchValue = String(document.getElementById('stockLevelsSearch')?.value || '').trim().toLowerCase();
     const rows = (state.rawMaterials || []).filter((material) =>
@@ -2135,7 +2144,7 @@ function renderStoreStockLevels() {
     );
 
     if (!rows.length) {
-        body.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:24px; color:#64748b;">No raw materials match this view.</td></tr>';
+        body.innerHTML = `<tr><td colspan="${showAdjustAction ? 8 : 7}" style="text-align:center; padding:24px; color:#64748b;">No raw materials match this view.</td></tr>`;
         return;
     }
 
@@ -2157,6 +2166,11 @@ function renderStoreStockLevels() {
                         ${status.label}
                     </span>
                 </td>
+                ${showAdjustAction ? `
+                    <td style="text-align:right;">
+                        <button class="btn" type="button" onclick="adjustStoreStockLevel('${material.id}')">Adjust</button>
+                    </td>
+                ` : ''}
             </tr>
         `;
     }).join('');
@@ -4027,6 +4041,58 @@ window.deleteBarIssueHistory = async (issueId) => {
         showAppToast('Issue record deleted and stock reversed.');
     } catch (error) {
         handleError(error, 'Failed to delete stock issue');
+    }
+};
+
+window.adjustStoreStockLevel = async (materialId) => {
+    try {
+        requirePermission(PERMISSIONS.MANAGE_RAW_MATERIALS);
+        if (!canAdjustStockLevels()) {
+            throw new Error('Only managers can adjust stock levels.');
+        }
+
+        const material = (state.rawMaterials || []).find((entry) => String(entry.id) === String(materialId));
+        if (!material) {
+            throw new Error('Selected stock item was not found.');
+        }
+
+        const currentStock = toNumber(material.stock_level ?? material.current_stock);
+        const unitLabel = material.store_unit || 'units';
+        const response = prompt(
+            `Enter the corrected stock level for ${getDisplayMaterialName(material.name)} in ${unitLabel}.`,
+            String(currentStock)
+        );
+
+        if (response === null) {
+            return;
+        }
+
+        const trimmedValue = String(response).trim();
+        if (!trimmedValue) {
+            throw new Error('Stock level adjustment requires a value.');
+        }
+
+        const nextStockLevel = Number(trimmedValue);
+        if (!Number.isFinite(nextStockLevel)) {
+            throw new Error('Enter a valid stock quantity.');
+        }
+        if (nextStockLevel < 0) {
+            throw new Error('Stock level cannot be negative.');
+        }
+
+        if (!confirm(`Set ${getDisplayMaterialName(material.name)} stock to ${formatQuantity(nextStockLevel)} ${unitLabel}?`)) {
+            return;
+        }
+
+        const result = await repositories.updateRawMaterialStockLevel(getScope(), material.id, nextStockLevel);
+        if (result.error) throw result.error;
+
+        await loadRawMaterials();
+        renderStoreStockLevels();
+        updateDropdowns();
+        showAppToast(`Stock level updated for ${getDisplayMaterialName(material.name)}.`);
+    } catch (error) {
+        handleError(error, 'Failed to adjust stock level');
     }
 };
 
