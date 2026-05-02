@@ -207,6 +207,18 @@ function createStockReceiptDraft() {
     };
 }
 
+function createSupplyReceiptDraft() {
+    return {
+        supplyItemId: '',
+        itemSearch: '',
+        category: '',
+        buyUnit: '',
+        qty: '',
+        totalReceivedCost: '',
+        notes: ''
+    };
+}
+
 function createStockTransferDraft() {
     return {
         materialId: '',
@@ -242,6 +254,12 @@ function ensureFinanceDrafts() {
 function ensureStockReceiptDrafts() {
     if (!Array.isArray(state.stockReceiptDrafts) || !state.stockReceiptDrafts.length) {
         state.stockReceiptDrafts = [createStockReceiptDraft()];
+    }
+}
+
+function ensureSupplyReceiptDrafts() {
+    if (!Array.isArray(state.supplyReceiptDrafts) || !state.supplyReceiptDrafts.length) {
+        state.supplyReceiptDrafts = [createSupplyReceiptDraft()];
     }
 }
 
@@ -465,6 +483,9 @@ function resetBranchScopedDrafts() {
     state.kitchenDrafts = [];
     state.stockReceiptDrafts = [];
     state.stockTransfers = [];
+    state.supplyItems = [];
+    state.supplyReceiptDrafts = [];
+    state.supplyReceipts = [];
     state.stockTransferDestinationBranchId = '';
     state.stockTransferDrafts = [];
     currentAuditReport = null;
@@ -849,6 +870,33 @@ function findRawMaterialByDisplayName(value) {
         const displayName = getDisplayMaterialName(material.name).trim().toLowerCase();
         return storedName === normalized || displayName === normalized;
     }) || null;
+}
+
+function getDisplaySupplyItemName(storedName) {
+    return stripEntityCodePrefix(storedName).trim();
+}
+
+function findSupplyItemByDisplayName(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (!normalized) return null;
+
+    return (state.supplyItems || []).find((item) => {
+        const storedName = String(item.name || '').trim().toLowerCase();
+        const displayName = getDisplaySupplyItemName(item.name).trim().toLowerCase();
+        return storedName === normalized || displayName === normalized;
+    }) || null;
+}
+
+function getSupplyCategories() {
+    const categories = Array.from(new Set(
+        (state.supplyItems || [])
+            .map((item) => String(item.category || '').trim())
+            .filter(Boolean)
+    )).sort((left, right) => left.localeCompare(right));
+
+    return categories.length
+        ? categories
+        : ['Cleaning', 'Consumables', 'Packaging', 'Guest Supplies', 'Admin Supplies', 'General Supplies'];
 }
 
 function splitProductName(storedName) {
@@ -1516,6 +1564,37 @@ async function loadStockReceipts() {
     `).join('') : '<tr><td colspan="9" style="text-align:center; padding:24px; color:#64748b;">No items received in this shift yet.</td></tr>';
 }
 
+async function loadSupplyItems() {
+    const { data, error } = await repositories.getSupplyItems(getScope());
+    if (error) throw error;
+    state.supplyItems = data || [];
+}
+
+async function loadSupplyReceipts() {
+    const { data, error } = await repositories.getSupplyReceipts(getScope());
+    if (error) throw error;
+
+    const currentShiftId = String(state.currentShift?.id || '');
+    const currentShiftCreatedAt = state.currentShift?.created_at
+        ? new Date(state.currentShift.created_at).getTime()
+        : 0;
+
+    const shiftRows = (data || []).filter((row) => {
+        if (!currentShiftId) return true;
+        if (String(row.shift_id || '') === currentShiftId) {
+            return true;
+        }
+        if (!row.shift_id && currentShiftCreatedAt > 0) {
+            const receiptCreatedAt = row.created_at ? new Date(row.created_at).getTime() : 0;
+            return receiptCreatedAt >= currentShiftCreatedAt;
+        }
+        return false;
+    });
+
+    state.supplyReceipts = shiftRows;
+    renderSupplyReceiptsView();
+}
+
 async function loadStockTransfers() {
     const { data, error } = await repositories.getStockTransfers(getScope());
     if (error) throw error;
@@ -2176,6 +2255,105 @@ function renderStoreStockLevels() {
     }).join('');
 }
 
+function renderSupplyReceiptsView() {
+    const batchBody = document.getElementById('supplyReceiptBatchBody');
+    const historyBody = document.getElementById('supplyReceiptsBody');
+    const batchTotalNode = document.getElementById('supplyReceiptBatchTotal');
+    const historyTotalNode = document.getElementById('supplyReceiptHistoryTotal');
+    if (!batchBody || !historyBody) return;
+
+    ensureSupplyReceiptDrafts();
+    const selectedItemIds = state.supplyReceiptDrafts
+        .map((draft) => String(draft.supplyItemId || ''))
+        .filter(Boolean);
+    const categories = getSupplyCategories();
+
+    batchBody.innerHTML = state.supplyReceiptDrafts.map((draft, index) => {
+        const selectedItem = (state.supplyItems || []).find((item) => String(item.id) === String(draft.supplyItemId || ''));
+        const inputValue = draft.itemSearch || (selectedItem ? getDisplaySupplyItemName(selectedItem.name) : '');
+        const categoryValue = draft.category || selectedItem?.category || 'General Supplies';
+        const buyUnitValue = draft.buyUnit || selectedItem?.buy_unit || '';
+        const options = (state.supplyItems || []).map((item) => {
+            const itemId = String(item.id);
+            const isSelected = itemId === String(draft.supplyItemId || '');
+            const disabled = !isSelected && selectedItemIds.includes(itemId);
+            const label = getDisplaySupplyItemName(item.name);
+            return `<option value="${label}">${disabled ? `${label} (already selected)` : label}</option>`;
+        }).join('');
+
+        return `
+            <tr>
+                <td>
+                    <input
+                        type="text"
+                        id="supplyReceiptItem${index}"
+                        name="supplyReceiptItem${index}"
+                        list="supplyReceiptItemList${index}"
+                        value="${inputValue}"
+                        placeholder="Start typing supply item"
+                        autocomplete="off"
+                        oninput="updateSupplyReceiptDraft(${index}, 'itemSearch', this.value)"
+                        onchange="selectSupplyReceiptItem(${index}, this.value)">
+                    <datalist id="supplyReceiptItemList${index}">
+                        ${options}
+                    </datalist>
+                </td>
+                <td>
+                    <input
+                        type="text"
+                        id="supplyReceiptCategory${index}"
+                        name="supplyReceiptCategory${index}"
+                        list="supplyReceiptCategoryList${index}"
+                        value="${categoryValue}"
+                        placeholder="Category"
+                        oninput="updateSupplyReceiptDraft(${index}, 'category', this.value)">
+                    <datalist id="supplyReceiptCategoryList${index}">
+                        ${categories.map((category) => `<option value="${category}"></option>`).join('')}
+                    </datalist>
+                </td>
+                <td>
+                    <input type="text" id="supplyReceiptBuyUnit${index}" name="supplyReceiptBuyUnit${index}" value="${buyUnitValue}" placeholder="e.g. pack" oninput="updateSupplyReceiptDraft(${index}, 'buyUnit', this.value)">
+                </td>
+                <td>
+                    <input type="number" id="supplyReceiptQty${index}" name="supplyReceiptQty${index}" min="0" step="0.01" value="${draft.qty || ''}" placeholder="0.00" oninput="updateSupplyReceiptDraft(${index}, 'qty', this.value)">
+                </td>
+                <td>
+                    <input type="number" id="supplyReceiptTotalCost${index}" name="supplyReceiptTotalCost${index}" min="0" step="0.01" value="${draft.totalReceivedCost || ''}" placeholder="0.00" oninput="updateSupplyReceiptDraft(${index}, 'totalReceivedCost', this.value)">
+                </td>
+                <td>
+                    <input type="text" id="supplyReceiptNotes${index}" name="supplyReceiptNotes${index}" value="${draft.notes || ''}" placeholder="Optional note" oninput="updateSupplyReceiptDraft(${index}, 'notes', this.value)">
+                </td>
+                <td style="text-align:right;">
+                    <button class="btn" type="button" onclick="removeSupplyReceiptLine(${index})" ${state.supplyReceiptDrafts.length === 1 ? 'disabled' : ''}>Remove</button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+
+    const batchTotal = state.supplyReceiptDrafts.reduce((sum, draft) => sum + toNumber(draft.totalReceivedCost), 0);
+    if (batchTotalNode) {
+        batchTotalNode.innerText = `Supplies Receipt Total: KES ${formatMoney(batchTotal)}`;
+    }
+
+    const historyTotal = (state.supplyReceipts || []).reduce((sum, row) => sum + toNumber(row.total_received_cost), 0);
+    if (historyTotalNode) {
+        historyTotalNode.innerText = `Shift Supplies Total: KES ${formatMoney(historyTotal)}`;
+    }
+
+    historyBody.innerHTML = state.supplyReceipts.length ? state.supplyReceipts.map((row) => `
+        <tr>
+            <td>${formatDateDisplay(row.created_at)}</td>
+            <td>${getDisplaySupplyItemName(row.item_name)}</td>
+            <td>${row.category || '--'}</td>
+            <td>${formatQuantity(row.qty_received)} ${row.buy_unit || ''}</td>
+            <td>${formatMoney(row.total_received_cost)}</td>
+            <td>${formatMoney(row.unit_cost)}</td>
+            <td>${row.received_by || '--'}</td>
+            <td>${row.notes || '--'}</td>
+        </tr>
+    `).join('') : '<tr><td colspan="8" style="text-align:center; padding:24px; color:#64748b;">No supplies received in this shift yet.</td></tr>';
+}
+
 async function prepareStockTransferView() {
     if (!state.branchId && state.user?.id) {
         const { data: latestProfile, error: profileError } = await repositories.getProfile(state.user.id);
@@ -2202,24 +2380,33 @@ function setStocksView(view) {
     const isLevels = view === 'levels';
     const isIssues = view === 'issues';
     const isTransfers = view === 'transfers';
+    const isSupplies = view === 'supplies';
     const receiptsView = document.getElementById('stocksReceiptsView');
+    const suppliesView = document.getElementById('stocksSuppliesView');
     const levelsView = document.getElementById('stocksLevelsView');
     const issuesView = document.getElementById('stocksIssuesView');
     const transfersView = document.getElementById('stocksTransfersView');
     const receiptsButton = document.getElementById('stocksViewReceiptsBtn');
+    const suppliesButton = document.getElementById('stocksViewSuppliesBtn');
     const levelsButton = document.getElementById('stocksViewLevelsBtn');
     const issuesButton = document.getElementById('stocksViewIssuesBtn');
     const transfersButton = document.getElementById('stocksViewTransfersBtn');
 
-    if (receiptsView) receiptsView.classList.toggle('hidden', isLevels || isIssues || isTransfers);
+    if (receiptsView) receiptsView.classList.toggle('hidden', isLevels || isIssues || isTransfers || isSupplies);
+    if (suppliesView) suppliesView.classList.toggle('hidden', !isSupplies);
     if (levelsView) levelsView.classList.toggle('hidden', !isLevels);
     if (issuesView) issuesView.classList.toggle('hidden', !isIssues);
     if (transfersView) transfersView.classList.toggle('hidden', !isTransfers);
 
     if (receiptsButton) {
-        const active = !isLevels && !isTransfers;
+        const active = !isLevels && !isTransfers && !isSupplies;
         receiptsButton.style.background = active ? '#7092ae' : '#edf2f7';
         receiptsButton.style.color = active ? 'white' : '#2d3748';
+    }
+
+    if (suppliesButton) {
+        suppliesButton.style.background = isSupplies ? '#7092ae' : '#edf2f7';
+        suppliesButton.style.color = isSupplies ? 'white' : '#2d3748';
     }
 
     if (levelsButton) {
@@ -2240,6 +2427,10 @@ function setStocksView(view) {
 
     if (isLevels) {
         renderStoreStockLevels();
+    }
+
+    if (isSupplies) {
+        renderSupplyReceiptsView();
     }
 
     if (isIssues) {
@@ -2779,8 +2970,10 @@ async function refreshCoreData() {
     await loadInventory();
     await loadBranches();
     await loadRawMaterials();
+    await loadSupplyItems();
     await loadRecipes();
     await loadStockReceipts();
+    await loadSupplyReceipts();
     await loadStockTransfers();
     updateDropdowns();
     await loadKitchenData();
@@ -2858,6 +3051,21 @@ window.loadRawMaterials = async () => {
         updateDropdowns();
     } catch (error) {
         handleError(error, 'Failed to load raw materials');
+    }
+};
+window.loadSupplyItems = async () => {
+    try {
+        await loadSupplyItems();
+        renderSupplyReceiptsView();
+    } catch (error) {
+        handleError(error, 'Failed to load supply items');
+    }
+};
+window.loadSupplyReceipts = async () => {
+    try {
+        await loadSupplyReceipts();
+    } catch (error) {
+        handleError(error, 'Failed to load supply receipts');
     }
 };
 window.loadBranches = async () => {
@@ -3076,6 +3284,71 @@ window.selectStockReceiptMaterial = (index, value) => {
             : draft
     ));
     renderStockReceiptBatchInputs();
+};
+
+window.addSupplyReceiptLine = () => {
+    ensureSupplyReceiptDrafts();
+    state.supplyReceiptDrafts = [createSupplyReceiptDraft(), ...state.supplyReceiptDrafts];
+    renderSupplyReceiptsView();
+};
+
+window.removeSupplyReceiptLine = (index) => {
+    ensureSupplyReceiptDrafts();
+    state.supplyReceiptDrafts = state.supplyReceiptDrafts.filter((_, rowIndex) => rowIndex !== index);
+    if (!state.supplyReceiptDrafts.length) {
+        state.supplyReceiptDrafts = [createSupplyReceiptDraft()];
+    }
+    renderSupplyReceiptsView();
+};
+
+window.updateSupplyReceiptDraft = (index, field, value) => {
+    ensureSupplyReceiptDrafts();
+    state.supplyReceiptDrafts = state.supplyReceiptDrafts.map((draft, rowIndex) => (
+        rowIndex === index ? { ...draft, [field]: value } : draft
+    ));
+};
+
+window.selectSupplyReceiptItem = (index, value) => {
+    ensureSupplyReceiptDrafts();
+    const supplyItem = findSupplyItemByDisplayName(value);
+
+    if (!supplyItem) {
+        state.supplyReceiptDrafts = state.supplyReceiptDrafts.map((draft, rowIndex) => (
+            rowIndex === index
+                ? { ...draft, supplyItemId: '', itemSearch: value }
+                : draft
+        ));
+        renderSupplyReceiptsView();
+        return;
+    }
+
+    const duplicateIndex = state.supplyReceiptDrafts.findIndex((draft, rowIndex) =>
+        rowIndex !== index && String(draft.supplyItemId || '') === String(supplyItem.id)
+    );
+
+    if (duplicateIndex !== -1) {
+        handleError(new Error('This supply item is already selected in another line.'), 'Duplicate item');
+        state.supplyReceiptDrafts = state.supplyReceiptDrafts.map((draft, rowIndex) => (
+            rowIndex === index
+                ? { ...draft, supplyItemId: '', itemSearch: value }
+                : draft
+        ));
+        renderSupplyReceiptsView();
+        return;
+    }
+
+    state.supplyReceiptDrafts = state.supplyReceiptDrafts.map((draft, rowIndex) => (
+        rowIndex === index
+            ? {
+                ...draft,
+                supplyItemId: supplyItem.id,
+                itemSearch: getDisplaySupplyItemName(supplyItem.name),
+                category: supplyItem.category || draft.category || 'General Supplies',
+                buyUnit: supplyItem.buy_unit || draft.buyUnit || ''
+            }
+            : draft
+    ));
+    renderSupplyReceiptsView();
 };
 
 window.updateStockTransferDraft = (field, value) => {
@@ -3582,6 +3855,114 @@ window.processStockReceipt = async () => {
         updateDropdowns();
     } catch (error) {
         handleError(error, 'Failed to record stock');
+    } finally {
+        setLoading(button, false);
+    }
+};
+
+window.processSupplyReceipt = async () => {
+    const button = document.getElementById('processSupplyReceiptBtn');
+    setLoading(button, true);
+    try {
+        requirePermission(PERMISSIONS.RECEIVE_STOCK);
+        ensureSupplyReceiptDrafts();
+
+        const populatedRows = state.supplyReceiptDrafts
+            .map((draft, index) => ({
+                index,
+                supplyItemId: String(draft.supplyItemId || ''),
+                itemSearch: String(draft.itemSearch || '').trim(),
+                category: String(draft.category || '').trim(),
+                buyUnit: String(draft.buyUnit || '').trim(),
+                qty: toNumber(draft.qty),
+                totalReceivedCost: toNumber(draft.totalReceivedCost),
+                notes: String(draft.notes || '').trim()
+            }))
+            .filter((row) => row.supplyItemId || row.itemSearch || row.qty > 0 || row.totalReceivedCost > 0 || row.notes);
+
+        if (!populatedRows.length) throw new Error('Add at least one supply receipt line before posting.');
+
+        const createdItemIds = [];
+        const localSupplyItems = [...(state.supplyItems || [])];
+        const seenNames = new Set();
+
+        for (const row of populatedRows) {
+            if (!row.itemSearch) {
+                throw new Error(`Supply line ${row.index + 1}: enter an item name.`);
+            }
+            if (!row.buyUnit) {
+                throw new Error(`Supply line ${row.index + 1}: buying unit is required.`);
+            }
+            if (row.qty <= 0) {
+                throw new Error(`Supply line ${row.index + 1}: quantity must be greater than 0.`);
+            }
+            if (row.totalReceivedCost <= 0) {
+                throw new Error(`Supply line ${row.index + 1}: total received cost must be greater than 0.`);
+            }
+
+            let supplyItem = row.supplyItemId
+                ? localSupplyItems.find((item) => String(item.id) === row.supplyItemId)
+                : findSupplyItemByDisplayName(row.itemSearch);
+
+            if (!supplyItem) {
+                const created = await repositories.createSupplyItem(getScope(), {
+                    name: row.itemSearch,
+                    category: row.category || 'General Supplies',
+                    buyUnit: row.buyUnit
+                });
+                if (created.error) throw created.error;
+                supplyItem = created.data;
+                createdItemIds.push(supplyItem.id);
+                localSupplyItems.push(supplyItem);
+            }
+
+            const normalizedName = normalizeEntityName(supplyItem.name);
+            if (seenNames.has(normalizedName)) {
+                throw new Error(`Supply line ${row.index + 1}: this item is already entered in another line.`);
+            }
+            seenNames.add(normalizedName);
+
+            row.supplyItemId = supplyItem.id;
+            row.itemName = supplyItem.name;
+            row.category = row.category || supplyItem.category || 'General Supplies';
+            row.buyUnit = row.buyUnit || supplyItem.buy_unit || '';
+        }
+
+        const insertedReceiptIds = [];
+        try {
+            for (const row of populatedRows) {
+                const unitCost = row.totalReceivedCost / row.qty;
+                const receiptResult = await repositories.insertSupplyReceipt(getScope(), {
+                    shiftId: state.currentShift?.id || null,
+                    supplyItemId: row.supplyItemId,
+                    itemName: row.itemName,
+                    category: row.category || 'General Supplies',
+                    qtyReceived: row.qty,
+                    buyUnit: row.buyUnit,
+                    totalReceivedCost: row.totalReceivedCost,
+                    unitCost,
+                    notes: row.notes,
+                    receivedBy: getProfileDisplayName(state.user)
+                });
+                if (receiptResult.error) throw receiptResult.error;
+                if (receiptResult.data?.id) {
+                    insertedReceiptIds.push(receiptResult.data.id);
+                }
+            }
+        } catch (error) {
+            for (const receiptId of insertedReceiptIds.reverse()) {
+                await supabase.from('supply_receipts').delete().eq('id', receiptId);
+            }
+            throw error;
+        }
+
+        state.supplyReceiptDrafts = [createSupplyReceiptDraft()];
+        await loadSupplyItems();
+        await loadSupplyReceipts();
+        renderSupplyReceiptsView();
+        showAppToast(`Recorded ${populatedRows.length} supply receipt${populatedRows.length === 1 ? '' : 's'} successfully.`);
+    } catch (error) {
+        handleError(error, 'Failed to record supplies');
     } finally {
         setLoading(button, false);
     }
@@ -4172,6 +4553,8 @@ window.showPage = async (id) => {
         } else if (id === 'stocksPage') {
             await loadBranches();
             await loadRawMaterials();
+            await loadSupplyItems();
+            await loadSupplyReceipts();
             await loadBarStockIssues();
             await loadStockTransfers();
             updateDropdowns();
@@ -4788,6 +5171,7 @@ async function loadAuditReportData(startDate, endDate) {
     const [
         shiftsResult,
         receiptsResult,
+        supplyReceiptsResult,
         transfersResult,
         debtsResult,
         productsResult,
@@ -4796,6 +5180,7 @@ async function loadAuditReportData(startDate, endDate) {
     ] = await Promise.all([
         repositories.getShiftReportsByRange(scope, startDate, endDate),
         repositories.getStockReceiptsByRange(scope, startDate, endDate),
+        repositories.getSupplyReceiptsByRange(scope, startDate, endDate),
         repositories.getStockTransfersByRange(scope, startDate, endDate),
         repositories.getDebtsByRange(scope, startDate, endDate),
         repositories.getProducts(scope),
@@ -4805,6 +5190,7 @@ async function loadAuditReportData(startDate, endDate) {
 
     if (shiftsResult.error) throw shiftsResult.error;
     if (receiptsResult.error) throw receiptsResult.error;
+    if (supplyReceiptsResult.error) throw supplyReceiptsResult.error;
     if (transfersResult.error) throw transfersResult.error;
     if (debtsResult.error) throw debtsResult.error;
     if (productsResult.error) throw productsResult.error;
@@ -4825,6 +5211,7 @@ async function loadAuditReportData(startDate, endDate) {
     return {
         shifts: closedShifts,
         stockReceipts: receiptsResult.data || [],
+        supplyReceipts: supplyReceiptsResult.data || [],
         stockTransfers: transfersResult.data || [],
         debts: debtsResult.data || [],
         products: productsResult.data || [],
@@ -4873,6 +5260,40 @@ function buildRawItemsReceivedReport(data) {
             'Received Qty is what was entered in buy units.',
             'Store Qty Posted is the converted quantity applied to store stock in store units.',
             'Received Cost and Store Unit Price use the receipt-time snapshot when available.'
+        ]
+    };
+}
+
+function buildOperatingSuppliesReport(data) {
+    const showBranch = isAllBranchesReportScope();
+
+    return {
+        title: 'Operating Supplies Received',
+        columns: [
+            { key: 'date', label: 'Date' },
+            ...(showBranch ? [{ key: 'branch', label: 'Branch' }] : []),
+            { key: 'item_name', label: 'Item' },
+            { key: 'category', label: 'Category' },
+            { key: 'qty_received', label: 'Qty Received' },
+            { key: 'total_cost', label: 'Total Cost' },
+            { key: 'unit_cost', label: 'Unit Cost' },
+            { key: 'received_by', label: 'Received By' },
+            { key: 'notes', label: 'Notes' }
+        ],
+        rows: (data.supplyReceipts || []).map((row) => ({
+            date: formatDateDisplay(row.created_at),
+            ...(showBranch ? { branch: getBranchName(row.branch_id) } : {}),
+            item_name: getDisplaySupplyItemName(row.item_name),
+            category: row.category || 'General Supplies',
+            qty_received: `${formatQuantity(row.qty_received)} ${row.buy_unit || ''}`.trim(),
+            total_cost: formatMoney(row.total_received_cost),
+            unit_cost: formatMoney(row.unit_cost),
+            received_by: row.received_by || 'Staff',
+            notes: row.notes || ''
+        })),
+        notes: [
+            'Operating supplies are tracked separately from raw materials and are not available in the recipe matrix.',
+            'New supply items can be created on entry during receiving.'
         ]
     };
 }
@@ -5448,6 +5869,8 @@ function buildAuditReport(reportType, data) {
     switch (reportType) {
     case 'raw-items-received':
         return buildRawItemsReceivedReport(data);
+    case 'operating-supplies':
+        return buildOperatingSuppliesReport(data);
     case 'out-of-stock':
         return buildOutOfStockReport(data);
     case 'transfer-history':

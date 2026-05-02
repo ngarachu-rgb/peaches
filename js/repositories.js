@@ -1,6 +1,8 @@
 const TABLES_WITH_BRANCH = new Set([
     'inventory',
     'main_store',
+    'supply_items',
+    'supply_receipts',
     'recipes',
     'stock_receipts',
     'bar_stock_issues',
@@ -15,6 +17,8 @@ const TABLES_WITH_BRANCH = new Set([
 const BRANCH_READY_TABLES = new Set([
     'shifts',
     'main_store',
+    'supply_items',
+    'supply_receipts',
     'stock_receipts',
     'bar_stock_issues',
     'expenses',
@@ -899,6 +903,77 @@ export function createRepositories(supabase) {
                 'main_store',
                 context
             );
+        },
+
+        getSupplyItems(context) {
+            return applyScope(
+                supabase
+                    .from('supply_items')
+                    .select(selectColumns('supply_items', 'id, restaurant_id, name, category, buy_unit, is_active, created_at'))
+                    .eq('is_active', true)
+                    .order('name', { ascending: true }),
+                'supply_items',
+                context
+            );
+        },
+
+        createSupplyItem(context, payload) {
+            return supabase
+                .from('supply_items')
+                .insert([attachBranchPayload('supply_items', context, {
+                    restaurant_id: context.restaurantId,
+                    name: payload.name,
+                    category: payload.category,
+                    buy_unit: payload.buyUnit,
+                    is_active: true
+                })])
+                .select(selectColumns('supply_items', 'id, restaurant_id, name, category, buy_unit, is_active, created_at'))
+                .single();
+        },
+
+        getSupplyReceipts(context) {
+            return applyScope(
+                supabase
+                    .from('supply_receipts')
+                    .select(selectColumns('supply_receipts', 'id, restaurant_id, shift_id, supply_item_id, item_name, category, qty_received, buy_unit, total_received_cost, unit_cost, notes, received_by, created_at'))
+                    .order('created_at', { ascending: false }),
+                'supply_receipts',
+                context
+            );
+        },
+
+        getSupplyReceiptsByRange(context, startDate, endDate) {
+            const effectiveEndDate = endDate || startDate;
+            return applyScope(
+                supabase
+                    .from('supply_receipts')
+                    .select(selectColumns('supply_receipts', 'id, restaurant_id, shift_id, supply_item_id, item_name, category, qty_received, buy_unit, total_received_cost, unit_cost, notes, received_by, created_at'))
+                    .filter('created_at', 'gte', `${startDate}T00:00:00Z`)
+                    .filter('created_at', 'lte', `${effectiveEndDate}T23:59:59Z`)
+                    .order('created_at', { ascending: false }),
+                'supply_receipts',
+                context
+            );
+        },
+
+        insertSupplyReceipt(context, payload) {
+            return supabase
+                .from('supply_receipts')
+                .insert([attachBranchPayload('supply_receipts', context, {
+                    restaurant_id: context.restaurantId,
+                    shift_id: payload.shiftId,
+                    supply_item_id: payload.supplyItemId,
+                    item_name: payload.itemName,
+                    category: payload.category,
+                    qty_received: payload.qtyReceived,
+                    buy_unit: payload.buyUnit,
+                    total_received_cost: payload.totalReceivedCost,
+                    unit_cost: payload.unitCost,
+                    notes: payload.notes,
+                    received_by: payload.receivedBy
+                })])
+                .select(selectColumns('supply_receipts', 'id, restaurant_id, shift_id, supply_item_id, item_name, category, qty_received, buy_unit, total_received_cost, unit_cost, notes, received_by, created_at'))
+                .single();
         },
 
         async importRawMaterials(context, batch, existingMaterials = []) {

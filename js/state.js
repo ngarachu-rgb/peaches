@@ -18,6 +18,7 @@ export const state = {
     items: [],
     branches: [],
     rawMaterials: [],
+    supplyItems: [],
     recipeMatrix: [],
     currentShiftTotal: 0,
     currentShift: null,
@@ -36,6 +37,8 @@ export const state = {
     kitchenDrafts: [],
     stockReceiptDrafts: [],
     stockReceipts: [],
+    supplyReceiptDrafts: [],
+    supplyReceipts: [],
     stockTransfers: [],
     stockTransferDestinationBranchId: '',
     stockTransferDrafts: [],
@@ -123,6 +126,7 @@ export function resetAppState() {
     state.items = [];
     state.branches = [];
     state.rawMaterials = [];
+    state.supplyItems = [];
     state.recipeMatrix = [];
     state.currentShiftTotal = 0;
     state.currentShift = null;
@@ -141,6 +145,8 @@ export function resetAppState() {
     state.kitchenDrafts = [];
     state.stockReceiptDrafts = [];
     state.stockReceipts = [];
+    state.supplyReceiptDrafts = [];
+    state.supplyReceipts = [];
     state.stockTransfers = [];
     state.stockTransferDestinationBranchId = '';
     state.stockTransferDrafts = [];
