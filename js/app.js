@@ -71,6 +71,28 @@ function toDateOnly(value = new Date()) {
     return date.toISOString().split('T')[0];
 }
 
+function formatLongDate(value) {
+    if (!value) return '--';
+    return new Date(value).toLocaleDateString('en-GB', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric'
+    });
+}
+
+function formatLongDateTime(value) {
+    if (!value) return '--';
+    const date = new Date(value);
+    const datePart = formatLongDate(date);
+    const timePart = date.toLocaleTimeString('en-GB', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+    });
+    return `${datePart}, ${timePart}`;
+}
+
 function handleError(error, message = 'Something went wrong') {
     console.error(error);
     alert(error?.message || message);
@@ -931,12 +953,12 @@ function findProductByDisplayName(value) {
 
 function formatDateDisplay(value) {
     if (!value) return '';
-    return new Date(value).toLocaleDateString();
+    return formatLongDate(value);
 }
 
 function formatDateTimeDisplay(value) {
     if (!value) return '';
-    return new Date(value).toLocaleString();
+    return formatLongDateTime(value);
 }
 
 function escapeCsvValue(value) {
@@ -1175,7 +1197,7 @@ async function refreshCurrentShiftSummary() {
         }
     }
 
-    dateNode.innerText = new Date(`${shiftDate}T00:00:00`).toLocaleDateString();
+    dateNode.innerText = formatLongDate(`${shiftDate}T00:00:00`);
     shiftNode.innerText = shiftLabel || (state.shiftSystem === 2 ? 'DAY' : 'FULL');
     updateShiftStatusPanel(shiftDate, shiftLabel || (state.shiftSystem === 2 ? 'DAY' : 'FULL'));
 }
@@ -1192,7 +1214,7 @@ function updateShiftStatusPanel(shiftDateOverride = '', shiftTypeOverride = '') 
     const modeLabel = state.shiftSystem === 2 ? 'DAY / NIGHT' : 'FULL SHIFT';
 
     branchNode.innerText = branchName || '--';
-    dateNode.innerText = shiftDate ? new Date(`${shiftDate}T00:00:00`).toLocaleDateString() : '--';
+    dateNode.innerText = shiftDate ? formatLongDate(`${shiftDate}T00:00:00`) : '--';
     metaNode.innerText = state.currentShift
         ? `${branchName || '--'} · ${shiftType} shift is active`
         : `${branchName || '--'} · No active shift loaded`;
@@ -1531,7 +1553,7 @@ async function loadStockReceipts() {
 
     document.getElementById('stockReceiptsBody').innerHTML = shiftRows.length ? shiftRows.map((row) => `
         <tr>
-            <td>${new Date(row.created_at).toLocaleDateString()}</td>
+            <td>${formatLongDate(row.created_at)}</td>
             <td>${getDisplayMaterialName(row.material_name)}</td>
             <td>${(() => {
                 const meta = materialMetaMap.get(String(row.material_name || '').trim().toLowerCase());
@@ -2015,12 +2037,12 @@ function isDirectSalesBranch(branchId = '') {
 
 function formatShiftRecallDate(value) {
     if (!value) return '--';
-    return new Date(value).toLocaleDateString();
+    return formatLongDate(value);
 }
 
 function formatShiftRecallDateTime(value) {
     if (!value) return '--';
-    return new Date(value).toLocaleString();
+    return formatLongDateTime(value);
 }
 
 function buildShiftRecallSummaryCards(shift, shiftLabel) {
@@ -5064,7 +5086,7 @@ window.loadShiftReport = async () => {
 
               return `
                   <tr style="border-bottom: 1px solid #edf2f7;">
-                      <td style="padding:12px;">${new Date(shift.created_at).toLocaleDateString()}</td>
+                      <td style="padding:12px;">${formatLongDate(shift.created_at)}</td>
                       <td style="padding:12px;">${shiftLabel}</td>
                       <td style="padding:12px;">${shift.closed_by || 'Staff'}</td>
                       <td style="padding:12px; font-weight:bold;">${toNumber(shift.total_sales).toLocaleString()}</td>
