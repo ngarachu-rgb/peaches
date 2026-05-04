@@ -10,7 +10,7 @@ import {
 } from './calculations.js';
 import { PAGE_PERMISSIONS, PERMISSIONS, ROLES, canSwitchBranches, hasPageAccess, hasPermission } from './permissions.js';
 import { createRepositories } from './repositories.js';
-import { closeShiftWithCarryForward, ensureActiveShift, recordReverseDispatch } from './shift-service.js';
+import { adjustReverseDispatch, closeShiftWithCarryForward, ensureActiveShift, recordReverseDispatch } from './shift-service.js';
 import { transferRawMaterial } from './transfer-service.js';
 
 const repositories = createRepositories(supabase);
@@ -1635,7 +1635,7 @@ async function loadKitchenData() {
     const tbody = document.getElementById('kitchenBody');
     if (!tbody) return;
     if (!state.currentShift?.id) {
-        tbody.innerHTML = '<tr><td colspan="2">No active shift</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="3">No active shift</td></tr>';
         return;
     }
 
@@ -1643,15 +1643,21 @@ async function loadKitchenData() {
     if (error) throw error;
 
     if (!data?.length) {
-        tbody.innerHTML = '<tr><td colspan="2">No production yet</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="3">No production yet</td></tr>';
         return;
     }
 
     const productNames = new Map(state.items.map((item) => [String(item.product_id), getDisplayProductName(item.name)]));
+    const canAdjust = hasPermission(state.permissions, PERMISSIONS.POST_KITCHEN_OUTPUT);
     tbody.innerHTML = data.map((row) => `
         <tr>
             <td>${productNames.get(String(row.product_id)) || 'Unknown'}</td>
-            <td>${row.added_today || 0}</td>
+            <td>${formatQuantity(row.added_today || 0)}</td>
+            <td style="text-align:right;">
+                ${canAdjust && toNumber(row.added_today) > 0
+                    ? `<button class="btn" style="background:#edf2f7;" onclick="adjustKitchenProduction('${row.product_id}')">Adjust</button>`
+                    : '--'}
+            </td>
         </tr>
     `).join('');
 }
@@ -3749,7 +3755,8 @@ window.processReverseDispatch = async () => {
         requirePermission(PERMISSIONS.POST_KITCHEN_OUTPUT);
         if (!state.currentShift?.id) throw new Error('No active shift');
         const entries = (state.kitchenDrafts || [])
-            .map((entry) => ({
+            .map((entry, index) => ({
+                index,
                 productId: entry.productId,
                 qty: toNumber(entry.qty)
             }))
@@ -3757,19 +3764,91 @@ window.processReverseDispatch = async () => {
 
         if (!entries.length) throw new Error('Enter quantity for at least one finished product');
 
+        const successIndexes = new Set();
+        const failures = [];
+
         for (const entry of entries) {
-            await recordReverseDispatch(getScope(), repositories, state.currentShift.id, entry.productId, entry.qty);
+            try {
+                await recordReverseDispatch(getScope(), repositories, state.currentShift.id, entry.productId, entry.qty);
+                successIndexes.add(entry.index);
+            } catch (error) {
+                const item = state.items.find((product) => String(product.product_id) === String(entry.productId));
+                const itemName = getDisplayProductName(item?.name || 'Item');
+                failures.push(`- ${itemName}: ${error.message}`);
+            }
         }
 
-        state.kitchenDrafts = [createKitchenDraftRow()];
+        state.kitchenDrafts = state.kitchenDrafts.filter((_, rowIndex) => !successIndexes.has(rowIndex));
+        if (!state.kitchenDrafts.length) {
+            state.kitchenDrafts = [createKitchenDraftRow()];
+        }
         renderKitchenBatchInputs();
         await loadInventory();
         await loadKitchenData();
-        showAppToast('Production posted successfully');
+
+        if (successIndexes.size > 0) {
+            showAppToast(
+                failures.length
+                    ? `Posted ${successIndexes.size} item${successIndexes.size === 1 ? '' : 's'}. Unposted items remain for correction.`
+                    : 'Production posted successfully'
+            );
+        }
+
+        if (failures.length) {
+            throw new Error(`Some production items were not posted:\n${failures.join('\n')}`);
+        }
     } catch (error) {
         handleError(error, 'Failed to post production');
     } finally {
         setLoading(button, false);
+    }
+};
+
+window.adjustKitchenProduction = async (productId) => {
+    try {
+        requirePermission(PERMISSIONS.POST_KITCHEN_OUTPUT);
+        if (!state.currentShift?.id) {
+            throw new Error('No active shift was found.');
+        }
+
+        const item = state.items.find((entry) => String(entry.product_id) === String(productId));
+        if (!item?.id) {
+            throw new Error('Selected production row was not found.');
+        }
+
+        const currentAddedQty = toNumber(item.added_today);
+        const response = prompt(
+            `Enter the corrected total added quantity for ${getDisplayProductName(item.name)}.`,
+            String(currentAddedQty)
+        );
+
+        if (response === null) {
+            return;
+        }
+
+        const trimmedValue = String(response).trim();
+        if (!trimmedValue) {
+            throw new Error('Adjustment quantity is required.');
+        }
+
+        const nextAddedQty = Number(trimmedValue);
+        if (!Number.isFinite(nextAddedQty)) {
+            throw new Error('Enter a valid quantity.');
+        }
+        if (nextAddedQty < 0) {
+            throw new Error('Quantity cannot be negative.');
+        }
+
+        if (!confirm(`Adjust ${getDisplayProductName(item.name)} from ${formatQuantity(currentAddedQty)} to ${formatQuantity(nextAddedQty)}? Raw material stock will be rebalanced automatically.`)) {
+            return;
+        }
+
+        await adjustReverseDispatch(getScope(), repositories, state.currentShift.id, productId, nextAddedQty);
+        await loadInventory();
+        await loadKitchenData();
+        showAppToast(`Production adjusted for ${getDisplayProductName(item.name)}.`);
+    } catch (error) {
+        handleError(error, 'Failed to adjust kitchen production');
     }
 };
 

@@ -521,122 +521,236 @@ export async function recordReverseDispatch(context, repositories, shiftId, prod
     reverseDispatchInFlightKeys.add(dispatchKey);
 
     try {
-        const numericQty = toNumber(qty);
-        if (numericQty <= 0) {
-            throw new Error('Production quantity must be greater than 0.');
-        }
-
-        const [
-            { data: existingRow, error: existingError },
-            productsResult,
-            recipesResult,
-            rawMaterialsResult
-        ] = await Promise.all([
-            repositories.getShiftInventoryRow(context, shiftId, productId),
-            repositories.getProducts(context),
-            repositories.getRecipes(context),
-            repositories.getRawMaterials(context)
-        ]);
-
-        if (existingError) throw existingError;
-        if (productsResult.error) throw productsResult.error;
-        if (recipesResult.error) throw recipesResult.error;
-        if (rawMaterialsResult.error) throw rawMaterialsResult.error;
-
-        const product = (productsResult.data || []).find((item) => String(item.id) === String(productId));
-        if (!product) throw new Error('Selected finished product was not found.');
-
-        const matchingRecipes = (recipesResult.data || []).filter((recipe) =>
-            String(recipe.finished_item_name || '').trim().toLowerCase() === String(product.name || '').trim().toLowerCase()
-        );
-        if (!matchingRecipes.length) {
-            throw new Error(`No recipe matrix rows were found for ${product.name}.`);
-        }
-
-        const rawMaterialMap = new Map(
-            (rawMaterialsResult.data || []).map((material) => [
-                String(material.name || '').trim().toLowerCase(),
-                material
-            ])
-        );
-
-        const deductionPlan = new Map();
-        for (const recipe of matchingRecipes) {
-            const materialName = String(recipe.material_name || '').trim();
-            const material = rawMaterialMap.get(materialName.toLowerCase());
-            if (!material) {
-                throw new Error(`Recipe material "${materialName}" was not found in store stock.`);
-            }
-
-            const qtyPerUnit = toNumber(recipe.qty_per_unit);
-            if (qtyPerUnit <= 0) {
-                throw new Error(`Recipe quantity for "${materialName}" must be greater than 0 store units per item.`);
-            }
-
-            const storeQtyToDeduct = numericQty * qtyPerUnit;
-            const key = String(material.name || '').trim().toLowerCase();
-            const existingPlan = deductionPlan.get(key);
-
-            deductionPlan.set(key, {
-                materialName: material.name,
-                storeUnit: material.store_unit || 'store unit',
-                availableQty: toNumber(material.stock_level ?? material.current_stock),
-                qty: toNumber(existingPlan?.qty) + storeQtyToDeduct
-            });
-        }
-
-        for (const deduction of deductionPlan.values()) {
-            if (deduction.qty > deduction.availableQty) {
-                throw new Error(
-                    `Insufficient store stock for ${deduction.materialName}. ` +
-                    `Available: ${deduction.availableQty} ${deduction.storeUnit}. ` +
-                    `Needed: ${deduction.qty} ${deduction.storeUnit}.`
-                );
-            }
-        }
-
-        const appliedDeductions = [];
-        try {
-            for (const deduction of deductionPlan.values()) {
-                const deductionResult = await repositories.adjustRawMaterialStoreStock(
-                    context,
-                    deduction.materialName,
-                    -deduction.qty
-                );
-                if (deductionResult.error) throw deductionResult.error;
-
-                appliedDeductions.push({
-                    materialName: deduction.materialName,
-                    qty: deduction.qty
-                });
-            }
-
-            const rowPayload = {
-                shift_id: shiftId,
-                product_id: productId,
-                bbf: toNumber(existingRow?.bbf),
-                added_today: toNumber(existingRow?.added_today) + numericQty,
-                close_qty: toNumber(existingRow?.close_qty),
-                sold_qty: toNumber(existingRow?.sold_qty)
-            };
-
-            if (existingRow?.id) {
-                rowPayload.id = existingRow.id;
-            }
-
-            const { error: upsertError } = await repositories.upsertShiftInventoryRows(context, [rowPayload]);
-            if (upsertError) throw upsertError;
-        } catch (error) {
-            for (const deduction of appliedDeductions.reverse()) {
-                await repositories.adjustRawMaterialStoreStock(context, deduction.materialName, deduction.qty);
-            }
-            throw error;
-        }
-
+        await applyReverseDispatchDelta(context, repositories, shiftId, productId, qty);
         markRecentReverseDispatch(dispatchKey);
     } finally {
         reverseDispatchInFlightKeys.delete(dispatchKey);
     }
+}
+
+async function applyReverseDispatchDelta(context, repositories, shiftId, productId, qty) {
+    const numericQty = toNumber(qty);
+    if (numericQty <= 0) {
+        throw new Error('Production quantity must be greater than 0.');
+    }
+
+    const [
+        { data: existingRow, error: existingError },
+        productsResult,
+        recipesResult,
+        rawMaterialsResult
+    ] = await Promise.all([
+        repositories.getShiftInventoryRow(context, shiftId, productId),
+        repositories.getProducts(context),
+        repositories.getRecipes(context),
+        repositories.getRawMaterials(context)
+    ]);
+
+    if (existingError) throw existingError;
+    if (productsResult.error) throw productsResult.error;
+    if (recipesResult.error) throw recipesResult.error;
+    if (rawMaterialsResult.error) throw rawMaterialsResult.error;
+
+    const product = (productsResult.data || []).find((item) => String(item.id) === String(productId));
+    if (!product) throw new Error('Selected finished product was not found.');
+
+    const matchingRecipes = (recipesResult.data || []).filter((recipe) =>
+        String(recipe.finished_item_name || '').trim().toLowerCase() === String(product.name || '').trim().toLowerCase()
+    );
+    if (!matchingRecipes.length) {
+        throw new Error(`No recipe matrix rows were found for ${product.name}.`);
+    }
+
+    const rawMaterialMap = new Map(
+        (rawMaterialsResult.data || []).map((material) => [
+            String(material.name || '').trim().toLowerCase(),
+            material
+        ])
+    );
+
+    const deductionPlan = new Map();
+    for (const recipe of matchingRecipes) {
+        const materialName = String(recipe.material_name || '').trim();
+        const material = rawMaterialMap.get(materialName.toLowerCase());
+        if (!material) {
+            throw new Error(`Recipe material "${materialName}" was not found in store stock.`);
+        }
+
+        const qtyPerUnit = toNumber(recipe.qty_per_unit);
+        if (qtyPerUnit <= 0) {
+            throw new Error(`Recipe quantity for "${materialName}" must be greater than 0 store units per item.`);
+        }
+
+        const storeQtyToDeduct = numericQty * qtyPerUnit;
+        const key = String(material.name || '').trim().toLowerCase();
+        const existingPlan = deductionPlan.get(key);
+
+        deductionPlan.set(key, {
+            materialName: material.name,
+            storeUnit: material.store_unit || 'store unit',
+            availableQty: toNumber(material.stock_level ?? material.current_stock),
+            qty: toNumber(existingPlan?.qty) + storeQtyToDeduct
+        });
+    }
+
+    for (const deduction of deductionPlan.values()) {
+        if (deduction.qty > deduction.availableQty) {
+            throw new Error(
+                `Insufficient store stock for ${deduction.materialName}. ` +
+                `Available: ${deduction.availableQty} ${deduction.storeUnit}. ` +
+                `Needed: ${deduction.qty} ${deduction.storeUnit}.`
+            );
+        }
+    }
+
+    const appliedDeductions = [];
+    try {
+        for (const deduction of deductionPlan.values()) {
+            const deductionResult = await repositories.adjustRawMaterialStoreStock(
+                context,
+                deduction.materialName,
+                -deduction.qty
+            );
+            if (deductionResult.error) throw deductionResult.error;
+
+            appliedDeductions.push({
+                materialName: deduction.materialName,
+                qty: deduction.qty
+            });
+        }
+
+        const rowPayload = {
+            shift_id: shiftId,
+            product_id: productId,
+            bbf: toNumber(existingRow?.bbf),
+            added_today: toNumber(existingRow?.added_today) + numericQty,
+            close_qty: toNumber(existingRow?.close_qty),
+            sold_qty: toNumber(existingRow?.sold_qty)
+        };
+
+        if (existingRow?.id) {
+            rowPayload.id = existingRow.id;
+        }
+
+        const { error: upsertError } = await repositories.upsertShiftInventoryRows(context, [rowPayload]);
+        if (upsertError) throw upsertError;
+    } catch (error) {
+        for (const deduction of appliedDeductions.reverse()) {
+            await repositories.adjustRawMaterialStoreStock(context, deduction.materialName, deduction.qty);
+        }
+        throw error;
+    }
+}
+
+export async function adjustReverseDispatch(context, repositories, shiftId, productId, nextAddedQty) {
+    const numericNextAddedQty = toNumber(nextAddedQty);
+    if (numericNextAddedQty < 0) {
+        throw new Error('Adjusted production quantity cannot be negative.');
+    }
+
+    const [
+        { data: existingRow, error: existingError },
+        productsResult,
+        recipesResult,
+        rawMaterialsResult
+    ] = await Promise.all([
+        repositories.getShiftInventoryRow(context, shiftId, productId),
+        repositories.getProducts(context),
+        repositories.getRecipes(context),
+        repositories.getRawMaterials(context)
+    ]);
+
+    if (existingError) throw existingError;
+    if (productsResult.error) throw productsResult.error;
+    if (recipesResult.error) throw recipesResult.error;
+    if (rawMaterialsResult.error) throw rawMaterialsResult.error;
+
+    if (!existingRow?.id) {
+        throw new Error('No existing production record was found for the selected item.');
+    }
+
+    const currentAddedQty = toNumber(existingRow.added_today);
+    if (numericNextAddedQty === currentAddedQty) {
+        return { updatedQty: currentAddedQty };
+    }
+
+    const product = (productsResult.data || []).find((item) => String(item.id) === String(productId));
+    if (!product) throw new Error('Selected finished product was not found.');
+
+    const matchingRecipes = (recipesResult.data || []).filter((recipe) =>
+        String(recipe.finished_item_name || '').trim().toLowerCase() === String(product.name || '').trim().toLowerCase()
+    );
+    if (!matchingRecipes.length) {
+        throw new Error(`No recipe matrix rows were found for ${product.name}.`);
+    }
+
+    const rawMaterialMap = new Map(
+        (rawMaterialsResult.data || []).map((material) => [
+            String(material.name || '').trim().toLowerCase(),
+            material
+        ])
+    );
+
+    const deltaQty = numericNextAddedQty - currentAddedQty;
+
+    if (deltaQty > 0) {
+        await applyReverseDispatchDelta(context, repositories, shiftId, productId, deltaQty);
+        return { updatedQty: numericNextAddedQty };
+    }
+
+    const restoreQty = Math.abs(deltaQty);
+    const restorationPlan = [];
+    for (const recipe of matchingRecipes) {
+        const materialName = String(recipe.material_name || '').trim();
+        const material = rawMaterialMap.get(materialName.toLowerCase());
+        if (!material) {
+            throw new Error(`Recipe material "${materialName}" was not found in store stock.`);
+        }
+
+        const qtyPerUnit = toNumber(recipe.qty_per_unit);
+        if (qtyPerUnit <= 0) {
+            throw new Error(`Recipe quantity for "${materialName}" must be greater than 0 store units per item.`);
+        }
+
+        restorationPlan.push({
+            materialName: material.name,
+            qty: restoreQty * qtyPerUnit
+        });
+    }
+
+    for (const restoration of restorationPlan) {
+        const restoreResult = await repositories.adjustRawMaterialStoreStock(
+            context,
+            restoration.materialName,
+            restoration.qty
+        );
+        if (restoreResult.error) throw restoreResult.error;
+    }
+
+    try {
+        const { error: upsertError } = await repositories.upsertShiftInventoryRows(context, [{
+            id: existingRow.id,
+            shift_id: shiftId,
+            product_id: productId,
+            bbf: toNumber(existingRow.bbf),
+            added_today: numericNextAddedQty,
+            close_qty: toNumber(existingRow.close_qty),
+            sold_qty: toNumber(existingRow.sold_qty)
+        }]);
+        if (upsertError) throw upsertError;
+    } catch (error) {
+        for (const restoration of restorationPlan.reverse()) {
+            await repositories.adjustRawMaterialStoreStock(
+                context,
+                restoration.materialName,
+                -restoration.qty
+            );
+        }
+        throw error;
+    }
+
+    return { updatedQty: numericNextAddedQty };
+}
 }
 
 export async function closeShiftWithCarryForward(context, repositories, currentShift, payload) {
