@@ -751,7 +751,6 @@ export async function adjustReverseDispatch(context, repositories, shiftId, prod
 
     return { updatedQty: numericNextAddedQty };
 }
-}
 
 export async function closeShiftWithCarryForward(context, repositories, currentShift, payload) {
     const { data: openShifts, error: openShiftError } = await repositories.getOpenShifts(context);
