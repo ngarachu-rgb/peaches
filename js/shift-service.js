@@ -84,6 +84,11 @@ function isMeasuredRecipeProductName(value) {
     return /(?:^|\s)(30\s*ml|150\s*ml|glass)(?:$|\s)/i.test(String(value || '').trim());
 }
 
+function usesStoreStockDeduction(row) {
+    const saleMode = String(row?.saleMode || '').trim().toLowerCase();
+    return saleMode === 'full' || saleMode === 'direct';
+}
+
 function getSellableUnitsForMaterial(material) {
     if (!material) return 0;
 
@@ -152,7 +157,7 @@ async function buildDirectSalesDeductionPlan(context, repositories, inventoryRow
 
         // Measured direct-sales items (shots / glasses) are already deducted from store
         // when stock is issued into shift stock. Do not deduct them again at shift close.
-        if (row.saleMode === 'measured' || isMeasuredRecipeProductName(row.name)) {
+        if (!usesStoreStockDeduction(row) || row.saleMode === 'measured' || isMeasuredRecipeProductName(row.name)) {
             continue;
         }
 
@@ -767,14 +772,24 @@ export async function closeShiftWithCarryForward(context, repositories, currentS
     }
 
     const inventoryRows = (payload.inventoryRows || []).map((row) => {
-        const soldQty = calculateSoldQty({
-            openingQty: row.openingQty,
-            producedQty: row.producedQty,
-            receivedQty: row.receivedQty,
-            closingQty: row.closingQty,
-            transferredOutQty: row.transferredOutQty,
-            transferredInQty: row.transferredInQty
-        });
+        const soldQty = usesStoreStockDeduction(row)
+            ? Math.max(
+                0,
+                toNumber(row.openingQty) +
+                toNumber(row.producedQty) +
+                toNumber(row.receivedQty) -
+                toNumber(row.transferredOutQty) +
+                toNumber(row.transferredInQty) -
+                toNumber(row.closingQty)
+            )
+            : calculateSoldQty({
+                openingQty: row.openingQty,
+                producedQty: row.producedQty,
+                receivedQty: row.receivedQty,
+                closingQty: row.closingQty,
+                transferredOutQty: row.transferredOutQty,
+                transferredInQty: row.transferredInQty
+            });
 
         return {
             ...row,
@@ -813,9 +828,14 @@ export async function closeShiftWithCarryForward(context, repositories, currentS
         throw new Error(validationErrors.join('\n'));
     }
 
+    const directStoreRows = inventoryRows.filter((row) => usesStoreStockDeduction(row));
+    const deductionPlan = directStoreRows.length
+        ? await buildDirectSalesDeductionPlan(context, repositories, directStoreRows)
+        : new Map();
     const timestamp = new Date().toISOString();
     let closedShift = null;
     let nextShift = null;
+    const appliedDeductions = [];
 
     try {
         for (const expenseLine of payload.expenseLines || []) {
@@ -858,6 +878,20 @@ export async function closeShiftWithCarryForward(context, repositories, currentS
                 createdBy: payload.closedBy
             });
             if (error) throw error;
+        }
+
+        for (const deduction of deductionPlan.values()) {
+            const deductionResult = await repositories.adjustRawMaterialStoreStock(
+                context,
+                deduction.materialName,
+                -deduction.qty
+            );
+            if (deductionResult.error) throw deductionResult.error;
+
+            appliedDeductions.push({
+                materialName: deduction.materialName,
+                qty: deduction.qty
+            });
         }
 
         const closingRows = inventoryRows.map((row) => {
@@ -933,6 +967,10 @@ export async function closeShiftWithCarryForward(context, repositories, currentS
             finance
         };
     } catch (error) {
+        for (const deduction of appliedDeductions.reverse()) {
+            await repositories.adjustRawMaterialStoreStock(context, deduction.materialName, deduction.qty);
+        }
+
         if (nextShift?.id) {
             await repositories.deleteShiftInventoryByShift(context, nextShift.id);
             await repositories.deleteShift(nextShift.id);

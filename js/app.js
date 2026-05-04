@@ -1231,6 +1231,26 @@ function getDirectSalesRecipes(productName, recipes = state.recipeMatrix) {
     return (recipes || []).filter((recipe) => entityNamesMatch(recipe.finished_item_name, productName));
 }
 
+function isRestaurantDirectStoreProduct(product, materials = state.rawMaterials, recipes = state.recipeMatrix) {
+    if (!product || isDirectSalesMode()) return false;
+
+    const category = String(product.category || '').trim().toLowerCase();
+    const hasDrinkCategory = category.includes('drink');
+    const hasRecipeRows = getDirectSalesRecipes(product.name, recipes).length > 0;
+    const directMaterial = resolveDirectSalesMaterial(product.name, materials);
+
+    return hasDrinkCategory && !hasRecipeRows && Boolean(directMaterial);
+}
+
+function usesDirectStockMath(item) {
+    if (isDirectSalesMode()) return true;
+    return String(item?.sale_mode || '').toLowerCase() === 'direct';
+}
+
+function getKitchenEligibleItems() {
+    return (state.items || []).filter((item) => String(item?.sale_mode || '').toLowerCase() !== 'direct');
+}
+
 function calculateDirectSalesAvailability(product, materials = state.rawMaterials, recipes = state.recipeMatrix) {
     const recipeRows = getDirectSalesRecipes(product.name, recipes);
     if (recipeRows.length && isMeasuredRecipeProductName(product.name)) {
@@ -1347,12 +1367,10 @@ async function loadInventory() {
         repositories.getProducts(scope),
         state.currentShift?.id
             ? repositories.getShiftInventory(scope, state.currentShift.id)
-            : Promise.resolve({ data: [], error: null })
+            : Promise.resolve({ data: [], error: null }),
+        repositories.getRawMaterials(scope),
+        repositories.getRecipes(scope)
     ];
-
-    if (isDirectMode) {
-        requests.push(repositories.getRawMaterials(scope), repositories.getRecipes(scope));
-    }
 
     const [productsResult, shiftInventoryResult, rawMaterialsResult, recipesResult] = await Promise.all(requests);
     const { data: products, error: productsError } = productsResult;
@@ -1368,18 +1386,20 @@ async function loadInventory() {
     const shiftRows = shiftInventoryResult.data || [];
     state.items = (products || []).map((product) => {
         const shiftRow = shiftRows.find((row) => row.product_id === product.id);
-        const directMeta = isDirectMode
+        const directRestaurantItem = !isDirectMode && isRestaurantDirectStoreProduct(product, state.rawMaterials, state.recipeMatrix);
+        const usesDirectMath = isDirectMode || directRestaurantItem;
+        const directMeta = usesDirectMath
             ? calculateDirectSalesAvailability(product, state.rawMaterials, state.recipeMatrix)
             : null;
         const measuredItem = isDirectMode ? isMeasuredRecipeProductName(product.name) : false;
         const openingQty = toNumber(shiftRow?.bbf);
-        const availableQty = isDirectMode
+        const availableQty = usesDirectMath
             ? (measuredItem
                 ? openingQty + toNumber(shiftRow?.added_today)
                 : getSellableUnitsForMaterial(resolveDirectSalesMaterial(product.name, state.rawMaterials)))
             : 0;
         const issuedOutQty = isDirectMode && !measuredItem ? getIssuedSourceQtyForProduct(product.name) : 0;
-        const addedQty = isDirectMode
+        const addedQty = usesDirectMath
             ? (measuredItem
                 ? toNumber(shiftRow?.added_today)
                 : (availableQty + issuedOutQty - openingQty))
@@ -1394,10 +1414,12 @@ async function loadInventory() {
             bbf: openingQty,
             sold: 0,
             spoilt: 0,
-            closing_stock: isDirectMode ? null : getDraftedClosingQty(product.id, shiftRow?.close_qty),
+            closing_stock: usesDirectMath ? null : getDraftedClosingQty(product.id, shiftRow?.close_qty),
             available_stock: availableQty,
             issued_qty: issuedOutQty,
-            sale_mode: measuredItem ? 'measured' : 'full',
+            sale_mode: isDirectMode
+                ? (measuredItem ? 'measured' : 'full')
+                : (directRestaurantItem ? 'direct' : 'kitchen'),
             deduction_mode: directMeta?.sourceMode || '',
             deduction_mode_label: directMeta?.sourceLabel || '',
             available_unit_label: directMeta?.availableUnitLabel || ''
@@ -1703,7 +1725,9 @@ function renderKitchenBatchInputs() {
     const container = document.getElementById('kitchenBatchInputs');
     if (!container) return;
 
-    if (!state.items.length) {
+    const kitchenItems = getKitchenEligibleItems();
+
+    if (!kitchenItems.length) {
         container.innerHTML = '<div style="color:#64748b; font-size:14px;">No finished products available yet.</div>';
         return;
     }
@@ -1731,7 +1755,7 @@ function renderKitchenBatchInputs() {
                         style="padding:10px; border:1px solid #cbd5e0; border-radius:6px;"
                     >
                     <datalist id="kitchenProductList${index}">
-                        ${state.items.map((item) => {
+                        ${kitchenItems.map((item) => {
                             const itemId = String(item.product_id);
                             const isTakenElsewhere = selectedProductIds.includes(itemId) && itemId !== String(draft.productId || '');
                             const label = getDisplayProductName(item.name);
@@ -1773,7 +1797,8 @@ function syncKitchenDraftQty(index, value) {
 function renderKitchen() {
     const tbody = document.getElementById('kitchenBody');
     if (!tbody) return;
-    tbody.innerHTML = state.items.map((item) => `
+    const kitchenItems = getKitchenEligibleItems();
+    tbody.innerHTML = kitchenItems.map((item) => `
         <tr>
             <td>${getDisplayProductName(item.name) || 'Unknown'}</td>
             <td style="font-weight:bold; color:blue;">${item.added_today || 0}</td>
@@ -1790,6 +1815,7 @@ function recalculateSalesTotals() {
     document.querySelectorAll('#salesBody .sales-input').forEach((input) => {
         const productId = input.dataset.productId;
         const item = state.items.find((entry) => String(entry.product_id) === String(productId));
+        const usesDirectMath = usesDirectStockMath(item);
         const maxQty = toNumber(input.dataset.maxQty);
         const rawValue = String(input.value ?? '').trim();
         const hasEntry = rawValue !== '';
@@ -1797,7 +1823,7 @@ function recalculateSalesTotals() {
         if (hasEntry && String(input.value) !== String(safeValue)) {
             input.value = safeValue;
         }
-        const soldQty = isDirectSalesMode()
+        const soldQty = usesDirectMath
             ? Math.max(
                 0,
                 toNumber(input.dataset.openingQty) +
@@ -1842,7 +1868,6 @@ function recalculateSalesTotals() {
 function renderSales() {
     const body = document.getElementById('salesBody');
     if (!body) return;
-    const directSalesMode = isDirectSalesMode();
     updateSalesTableHeaders();
 
     const visibleItems = (state.items || []).filter((item) => shouldDisplaySalesItem(item));
@@ -1853,7 +1878,8 @@ function renderSales() {
     }
 
       body.innerHTML = visibleItems.map((item) => {
-          const totalAvailable = directSalesMode
+          const usesDirectMath = usesDirectStockMath(item);
+          const totalAvailable = usesDirectMath
               ? toNumber(item.available_stock ?? (toNumber(item.bbf) + toNumber(item.added_today)))
               : toNumber(item.bbf) + toNumber(item.added_today);
           const explicitValue = hasExplicitClosingDraft(item.product_id)
@@ -1864,11 +1890,11 @@ function renderSales() {
                   <td style="padding:6px 14px; font-weight:500;">${getDisplayProductName(item.name)}</td>
                   <td style="text-align:left;">
                       <span style="display:inline-flex; align-items:center; min-width:48px; padding:0; color:#1d4ed8; font-weight:700;">
-                          ${directSalesMode ? formatQuantity(item.bbf) : item.bbf}
+                          ${usesDirectMath ? formatQuantity(item.bbf) : item.bbf}
                       </span>
                   </td>
                   <td style="text-align:left;">
-                      ${directSalesMode ? `
+                      ${usesDirectMath ? `
                           <span style="display:inline-flex; align-items:center; min-width:48px; padding:0; color:#047857; font-weight:700;">
                               ${formatQuantity(item.added_today)}
                           </span>
@@ -1881,7 +1907,7 @@ function renderSales() {
                   <td style="text-align:left;">
                       <input type="number"
                           class="sales-input"
-                          placeholder="${directSalesMode ? 'Bal Qty' : 'Insert qty'}"
+                          placeholder="${usesDirectMath ? 'Bal Qty' : 'Insert qty'}"
                         oninput="calcSalesRow(this, ${totalAvailable}, ${item.price})"
                         min="0"
                         step="0.01"
@@ -1891,7 +1917,7 @@ function renderSales() {
                         data-shift-row-id="${item.id || ''}"
                         data-opening-qty="${item.bbf}"
                         data-produced-qty="${item.added_today}"
-                        data-issued-qty="${directSalesMode ? toNumber(item.issued_qty) : 0}"
+                        data-issued-qty="${usesDirectMath ? toNumber(item.issued_qty) : 0}"
                         data-max-qty="${totalAvailable}"
                         value="${explicitValue}"
                         style="display:block; width:120px; padding:6px; border:1px solid #7092ae; border-radius:4px; margin:0;">
@@ -2847,11 +2873,21 @@ function collectClosingRows() {
 
     const visibleRows = Array.from(document.querySelectorAll('#salesBody .sales-input')).map((input) => {
         const item = state.items.find((entry) => String(entry.product_id) === String(input.dataset.productId));
-        const soldQty = calculateSoldQty({
-            openingQty: input.dataset.openingQty,
-            producedQty: input.dataset.producedQty,
-            closingQty: input.value
-        });
+        const saleMode = item?.sale_mode || 'kitchen';
+        const usesDirectMath = String(saleMode).toLowerCase() === 'direct';
+        const soldQty = usesDirectMath
+            ? Math.max(
+                0,
+                toNumber(input.dataset.openingQty) +
+                toNumber(input.dataset.producedQty) -
+                toNumber(input.dataset.issuedQty) -
+                toNumber(input.value)
+            )
+            : calculateSoldQty({
+                openingQty: input.dataset.openingQty,
+                producedQty: input.dataset.producedQty,
+                closingQty: input.value
+            });
         return {
             shiftRowId: input.dataset.shiftRowId,
             productId: input.dataset.productId,
@@ -2864,6 +2900,7 @@ function collectClosingRows() {
             transferredInQty: 0,
             spoiltQty: toNumber(item?.spoilt),
             closingQty: toNumber(input.value),
+            saleMode,
             soldQty,
             unitPrice: toNumber(item?.price),
             lineTotal: soldQty * toNumber(item?.price)
@@ -2884,6 +2921,7 @@ function collectClosingRows() {
             transferredInQty: 0,
             spoiltQty: toNumber(item?.spoilt),
             closingQty: 0,
+            saleMode: item?.sale_mode || 'kitchen',
             soldQty: 0,
             unitPrice: toNumber(item?.price),
             lineTotal: 0
@@ -3176,7 +3214,7 @@ window.calcSalesRow = (element) => {
     const maxQty = toNumber(element.dataset.maxQty);
     const rawValue = String(element.value ?? '').trim();
     if (rawValue === '') {
-        if (item) item.closing_stock = isDirectSalesMode() ? null : null;
+        if (item) item.closing_stock = null;
         delete state.salesDrafts[String(element.dataset.productId)];
         recalculateSalesTotals();
         return;
@@ -3184,7 +3222,7 @@ window.calcSalesRow = (element) => {
 
     const safeValue = clampClosingQty(rawValue, maxQty);
     element.value = safeValue;
-    if (item && !isDirectSalesMode()) item.closing_stock = safeValue;
+    if (item && !usesDirectStockMath(item)) item.closing_stock = safeValue;
     state.salesDrafts[String(element.dataset.productId)] = safeValue;
     recalculateSalesTotals();
 };
@@ -3710,6 +3748,15 @@ window.selectKitchenDraftProduct = (index, value) => {
     if (!product) {
         state.kitchenDrafts = state.kitchenDrafts.map((draft, rowIndex) => (
             rowIndex === index ? { ...draft, productId: '', productSearch: value } : draft
+        ));
+        renderKitchenBatchInputs();
+        return;
+    }
+
+    if (String(product.sale_mode || '').toLowerCase() === 'direct') {
+        handleError(new Error('This item is sold directly from store and should not be added in Kitchen Ops.'), 'Direct sale item');
+        state.kitchenDrafts = state.kitchenDrafts.map((draft, rowIndex) => (
+            rowIndex === index ? { ...draft, productId: '', productSearch: '' } : draft
         ));
         renderKitchenBatchInputs();
         return;
