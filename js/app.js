@@ -1810,6 +1810,22 @@ function shouldDisplaySalesItem(item) {
     return toNumber(item?.bbf) > 0 || toNumber(item?.added_today) > 0;
 }
 
+function getSalesItemCategoryRank(category) {
+    const normalized = String(category || '').trim().toLowerCase();
+    if (normalized === 'food') return 0;
+    return 1;
+}
+
+function compareSalesItems(left, right) {
+    const categoryRankDiff = getSalesItemCategoryRank(left?.category) - getSalesItemCategoryRank(right?.category);
+    if (categoryRankDiff !== 0) return categoryRankDiff;
+
+    const categoryDiff = String(left?.category || '').localeCompare(String(right?.category || ''), undefined, { sensitivity: 'base' });
+    if (categoryDiff !== 0) return categoryDiff;
+
+    return getDisplayProductName(left?.name || '').localeCompare(getDisplayProductName(right?.name || ''), undefined, { sensitivity: 'base' });
+}
+
 function recalculateSalesTotals() {
     let total = 0;
     document.querySelectorAll('#salesBody .sales-input').forEach((input) => {
@@ -1870,7 +1886,9 @@ function renderSales() {
     if (!body) return;
     updateSalesTableHeaders();
 
-    const visibleItems = (state.items || []).filter((item) => shouldDisplaySalesItem(item));
+    const visibleItems = (state.items || [])
+        .filter((item) => shouldDisplaySalesItem(item))
+        .sort(compareSalesItems);
 
     if (!visibleItems.length) {
         body.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:30px;">No items with opening stock or added stock for this shift.</td></tr>';
