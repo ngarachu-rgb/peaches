@@ -1810,6 +1810,42 @@ function shouldDisplaySalesItem(item) {
     return toNumber(item?.bbf) > 0 || toNumber(item?.added_today) > 0;
 }
 
+function getSalesSectionKey(item) {
+    if (isDirectSalesMode()) {
+        const name = String(item?.name || '').trim();
+        const category = String(item?.category || '').trim().toLowerCase();
+        if (/wine/i.test(name)) return 'wine';
+        if (isMeasuredRecipeProductName(name) || category.includes('shot') || category.includes('glass') || category.includes('cocktail')) {
+            return 'shots';
+        }
+        if (category === 'bottled & canned') return 'bottled_can';
+        return 'full_bottle';
+    }
+
+    const category = String(item?.category || '').trim().toLowerCase();
+    if (category === 'food') return 'food';
+    if (category === 'snacks') return 'snacks';
+    if (category === 'drinks') return 'drinks';
+    return category || 'other';
+}
+
+function getSalesSectionLabel(sectionKey) {
+    const labels = {
+        food: 'Food',
+        snacks: 'Snacks',
+        drinks: 'Drinks',
+        bottled_can: 'Bottled & Can',
+        full_bottle: 'Full Bottle',
+        shots: 'Shots',
+        wine: 'Wine',
+        other: 'Other'
+    };
+
+    return labels[sectionKey] || String(sectionKey || 'Other')
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
 function getSalesItemCategoryRank(category) {
     const normalized = String(category || '').trim().toLowerCase();
     if (normalized === 'food') return 0;
@@ -1817,11 +1853,14 @@ function getSalesItemCategoryRank(category) {
 }
 
 function compareSalesItems(left, right) {
-    const categoryRankDiff = getSalesItemCategoryRank(left?.category) - getSalesItemCategoryRank(right?.category);
-    if (categoryRankDiff !== 0) return categoryRankDiff;
-
-    const categoryDiff = String(left?.category || '').localeCompare(String(right?.category || ''), undefined, { sensitivity: 'base' });
-    if (categoryDiff !== 0) return categoryDiff;
+    const sectionOrder = isDirectSalesMode()
+        ? ['bottled_can', 'full_bottle', 'shots', 'wine', 'other']
+        : ['food', 'snacks', 'drinks', 'other'];
+    const leftSection = getSalesSectionKey(left);
+    const rightSection = getSalesSectionKey(right);
+    const leftIndex = Math.max(sectionOrder.indexOf(leftSection), 0);
+    const rightIndex = Math.max(sectionOrder.indexOf(rightSection), 0);
+    if (leftIndex !== rightIndex) return leftIndex - rightIndex;
 
     return getDisplayProductName(left?.name || '').localeCompare(getDisplayProductName(right?.name || ''), undefined, { sensitivity: 'base' });
 }
@@ -1895,7 +1934,19 @@ function renderSales() {
         return;
     }
 
+      let previousSectionKey = '';
       body.innerHTML = visibleItems.map((item) => {
+          const sectionKey = getSalesSectionKey(item);
+          const sectionMarkup = sectionKey !== previousSectionKey
+              ? `
+                  <tr class="sales-section-row" data-section="${sectionKey}">
+                      <td colspan="7" style="padding:8px 14px; background:#e8eef6; color:#274c77; font-weight:800; text-transform:uppercase; letter-spacing:0.04em; border-top:1px solid #d7e2ef; border-bottom:1px solid #d7e2ef;">
+                          ${getSalesSectionLabel(sectionKey)}
+                      </td>
+                  </tr>
+              `
+              : '';
+          previousSectionKey = sectionKey;
           const usesDirectMath = usesDirectStockMath(item);
           const totalAvailable = usesDirectMath
               ? toNumber(item.available_stock ?? (toNumber(item.bbf) + toNumber(item.added_today)))
@@ -1904,6 +1955,7 @@ function renderSales() {
               ? state.salesDrafts[String(item.product_id)]
               : '';
           return `
+              ${sectionMarkup}
               <tr>
                   <td style="padding:6px 14px; font-weight:500;">${getDisplayProductName(item.name)}</td>
                   <td style="text-align:left;">
@@ -3247,9 +3299,32 @@ window.calcSalesRow = (element) => {
 
 window.filterSales = () => {
     const searchTerm = document.getElementById('salesSearch').value.toLowerCase();
-    document.querySelectorAll('#salesBody tr').forEach((row) => {
+    const rows = Array.from(document.querySelectorAll('#salesBody tr'));
+    const sectionVisibility = new Map();
+
+    rows.forEach((row) => {
+        if (row.classList.contains('sales-section-row')) return;
         const itemName = row.cells[0]?.innerText.toLowerCase() || '';
-        row.style.display = itemName.includes(searchTerm) ? '' : 'none';
+        const visible = itemName.includes(searchTerm);
+        row.style.display = visible ? '' : 'none';
+
+        const previousSectionRow = row.previousElementSibling?.classList.contains('sales-section-row')
+            ? row.previousElementSibling
+            : null;
+        const sectionKey = previousSectionRow?.dataset.section
+            || Array.from(row.parentElement.children)
+                .slice(0, Array.from(row.parentElement.children).indexOf(row))
+                .reverse()
+                .find((entry) => entry.classList?.contains('sales-section-row'))
+                ?.dataset.section
+            || '';
+        if (sectionKey) {
+            sectionVisibility.set(sectionKey, (sectionVisibility.get(sectionKey) || false) || visible);
+        }
+    });
+
+    document.querySelectorAll('#salesBody .sales-section-row').forEach((row) => {
+        row.style.display = sectionVisibility.get(row.dataset.section) ? '' : 'none';
     });
 };
 
