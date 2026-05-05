@@ -54,7 +54,7 @@ export function calculateAccountedIncome({
 }
 
 export function calculateVariance(totalSales, accountedIncome) {
-    return toNumber(totalSales) - toNumber(accountedIncome);
+    return toNumber(accountedIncome) - toNumber(totalSales);
 }
 
 export function getCarryForwardBalances(previousShift) {

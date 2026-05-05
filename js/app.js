@@ -984,6 +984,17 @@ function downloadCsv(filename, columns, rows) {
     URL.revokeObjectURL(url);
 }
 
+function getVarianceDisplayStyle(value) {
+    const numericValue = toNumber(String(value ?? '').replace(/,/g, ''));
+    if (numericValue < -0.009) {
+        return 'color:#b91c1c; font-weight:700;';
+    }
+    if (numericValue > 0.009) {
+        return 'color:#166534; font-weight:700;';
+    }
+    return 'color:#1f2937; font-weight:700;';
+}
+
 function renderAuditReportPreview(report) {
     const preview = document.getElementById('auditReportPreview');
     if (!preview) return;
@@ -1019,7 +1030,12 @@ function renderAuditReportPreview(report) {
                           : 'padding:10px; border-bottom:1px solid #e2e8f0;';
                       return `
                       <tr style="${rowStyle}">
-                          ${report.columns.map((column) => `<td style="${cellStyle}">${row[column.key] ?? ''}</td>`).join('')}
+                          ${report.columns.map((column) => {
+                              const varianceStyle = column.key === 'variance'
+                                  ? getVarianceDisplayStyle(row[column.key])
+                                  : '';
+                              return `<td style="${cellStyle}${varianceStyle}">${row[column.key] ?? ''}</td>`;
+                          }).join('')}
                       </tr>
                   `;
                   }).join('')}
@@ -2198,7 +2214,7 @@ function buildShiftRecallSummaryCards(shift, shiftLabel) {
         { label: 'Expenses', value: `KES ${formatMoney(shift.total_expenses)}` },
         { label: 'Debt Given', value: `KES ${formatMoney(shift.total_debts)}` },
         { label: 'Debt Paid', value: `KES ${formatMoney(shift.debts_collected)}` },
-        { label: 'Variance', value: `KES ${formatMoney(variance)}` },
+        { label: 'Variance', value: `KES ${formatMoney(variance)}`, valueStyle: getVarianceDisplayStyle(variance) },
         { label: 'Recorded At', value: formatShiftRecallDateTime(shift.created_at) }
     ];
 
@@ -2216,7 +2232,7 @@ function buildShiftRecallSummaryCards(shift, shiftLabel) {
             ${summaryItems.map((item) => `
                 <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:12px 14px;">
                     <div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:6px;">${item.label}</div>
-                    <div style="font-size:15px; font-weight:700; color:#1f2937;">${item.value}</div>
+                    <div style="font-size:15px; ${item.valueStyle || 'font-weight:700; color:#1f2937;'}">${item.value}</div>
                 </div>
             `).join('')}
         </div>
@@ -3689,7 +3705,8 @@ window.calcRecon = () => {
 
     const varianceEl = document.getElementById('varianceVal');
     varianceEl.innerText = formatMoney(variance);
-    varianceEl.style.color = Math.abs(variance) < 0.01 ? 'green' : 'red';
+    varianceEl.style.color = variance < -0.009 ? '#b91c1c' : variance > 0.009 ? '#166534' : '#166534';
+    varianceEl.style.fontWeight = '700';
 };
 
 window.handleFinanceNotesInput = (textarea) => {
@@ -5339,7 +5356,7 @@ window.loadShiftReport = async () => {
                       <td style="padding:12px;">${shift.closed_by || 'Staff'}</td>
                       <td style="padding:12px; font-weight:bold;">${toNumber(shift.total_sales).toLocaleString()}</td>
                       <td style="padding:12px;">${mpesaIncome.toLocaleString()}</td>
-                      <td style="padding:12px; font-weight:bold; color:${Math.abs(variance) < 0.01 ? '#166534' : '#e11d48'};">${variance.toLocaleString()}</td>
+                      <td style="padding:12px; ${getVarianceDisplayStyle(variance)}">${variance.toLocaleString()}</td>
                     <td style="padding:12px;"><button class="btn" onclick="viewShiftDetail('${shift.id}')" style="background:#274766; color:white; border:1px solid #1f3146; padding:6px 12px; border-radius:6px; cursor:pointer; font-weight:700;">Shift Recall</button></td>
                 </tr>
             `;
