@@ -1815,11 +1815,8 @@ function getSalesSectionKey(item) {
         const name = String(item?.name || '').trim();
         const category = String(item?.category || '').trim().toLowerCase();
         if (/wine/i.test(name)) return 'wine';
-        if (isMeasuredRecipeProductName(name) || category.includes('shot') || category.includes('glass') || category.includes('cocktail')) {
-            return 'shots';
-        }
         if (category === 'bottled & canned') return 'bottled_can';
-        return 'full_bottle';
+        return 'spirits';
     }
 
     const category = String(item?.category || '').trim().toLowerCase();
@@ -1835,8 +1832,7 @@ function getSalesSectionLabel(sectionKey) {
         snacks: 'Snacks',
         drinks: 'Drinks',
         bottled_can: 'Bottled & Can',
-        full_bottle: 'Full Bottle',
-        shots: 'Shots',
+        spirits: 'Full Bottle & Shots',
         wine: 'Wine',
         other: 'Other'
     };
@@ -1844,6 +1840,27 @@ function getSalesSectionLabel(sectionKey) {
     return labels[sectionKey] || String(sectionKey || 'Other')
         .replace(/_/g, ' ')
         .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function getBarSalesFamilyName(itemName) {
+    return String(itemName || '')
+        .replace(/\b\d+\s*ml\b/gi, '')
+        .replace(/\bglass\b/gi, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function getBarSalesVariantRank(item) {
+    const name = String(item?.name || '').trim();
+    if (/\b750\s*ml\b/i.test(name)) return 0;
+    if (/\b1000\s*ml\b/i.test(name)) return 1;
+    if (/\b375\s*ml\b/i.test(name)) return 2;
+    if (/\b250\s*ml\b/i.test(name)) return 3;
+    if (/\b200\s*ml\b/i.test(name)) return 4;
+    if (/\b150\s*ml\b/i.test(name)) return 5;
+    if (/\b30\s*ml\b/i.test(name)) return 6;
+    if (/\bglass\b/i.test(name)) return 7;
+    return 8;
 }
 
 function getSalesItemCategoryRank(category) {
@@ -1854,13 +1871,25 @@ function getSalesItemCategoryRank(category) {
 
 function compareSalesItems(left, right) {
     const sectionOrder = isDirectSalesMode()
-        ? ['bottled_can', 'full_bottle', 'shots', 'wine', 'other']
+        ? ['bottled_can', 'spirits', 'wine', 'other']
         : ['food', 'snacks', 'drinks', 'other'];
     const leftSection = getSalesSectionKey(left);
     const rightSection = getSalesSectionKey(right);
     const leftIndex = Math.max(sectionOrder.indexOf(leftSection), 0);
     const rightIndex = Math.max(sectionOrder.indexOf(rightSection), 0);
     if (leftIndex !== rightIndex) return leftIndex - rightIndex;
+
+    if (isDirectSalesMode() && leftSection === 'spirits' && rightSection === 'spirits') {
+        const familyDiff = getBarSalesFamilyName(left?.name || '').localeCompare(
+            getBarSalesFamilyName(right?.name || ''),
+            undefined,
+            { sensitivity: 'base' }
+        );
+        if (familyDiff !== 0) return familyDiff;
+
+        const variantDiff = getBarSalesVariantRank(left) - getBarSalesVariantRank(right);
+        if (variantDiff !== 0) return variantDiff;
+    }
 
     return getDisplayProductName(left?.name || '').localeCompare(getDisplayProductName(right?.name || ''), undefined, { sensitivity: 'base' });
 }
