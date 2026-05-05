@@ -20,6 +20,13 @@ let productImportRows = [];
 let recipeImportRows = [];
 let currentAuditReport = null;
 let appToastTimer = null;
+const appModalState = {
+    sourceId: '',
+    sourceElement: null,
+    placeholder: null,
+    dismissHandler: null,
+    mode: 'hosted'
+};
 
 const NAV_BUTTONS = {
     salesPage: 'navSales',
@@ -120,6 +127,135 @@ function showAppToast(message, type = 'success') {
     appToastTimer = setTimeout(() => {
         toast.classList.remove('show');
     }, 2400);
+}
+
+function getAppModalElements() {
+    return {
+        wrap: document.getElementById('appModal'),
+        title: document.getElementById('appModalTitle'),
+        body: document.getElementById('appModalBody')
+    };
+}
+
+function hideAppModal() {
+    const { wrap, body } = getAppModalElements();
+    if (body) body.innerHTML = '';
+    if (wrap) {
+        wrap.classList.add('hidden');
+        wrap.style.display = 'none';
+    }
+    appModalState.sourceId = '';
+    appModalState.sourceElement = null;
+    appModalState.placeholder = null;
+    appModalState.dismissHandler = null;
+    appModalState.mode = 'hosted';
+}
+
+function closeAppModalImmediate() {
+    const { body } = getAppModalElements();
+
+    if (appModalState.mode === 'hosted' && appModalState.sourceElement && appModalState.placeholder?.parentNode) {
+        appModalState.placeholder.parentNode.insertBefore(appModalState.sourceElement, appModalState.placeholder);
+        appModalState.placeholder.remove();
+    }
+
+    if (body) body.innerHTML = '';
+    hideAppModal();
+}
+
+function openHostedModal(title, sourceId, dismissHandler = null) {
+    const { wrap, title: titleNode, body } = getAppModalElements();
+    const sourceElement = document.getElementById(sourceId);
+    if (!wrap || !titleNode || !body || !sourceElement) return;
+
+    closeAppModalImmediate();
+
+    const placeholder = document.createElement('div');
+    placeholder.dataset.modalPlaceholderFor = sourceId;
+    sourceElement.parentNode?.insertBefore(placeholder, sourceElement);
+    body.appendChild(sourceElement);
+
+    titleNode.innerText = title || 'Edit';
+    wrap.classList.remove('hidden');
+    wrap.style.display = 'flex';
+
+    appModalState.sourceId = sourceId;
+    appModalState.sourceElement = sourceElement;
+    appModalState.placeholder = placeholder;
+    appModalState.dismissHandler = dismissHandler;
+    appModalState.mode = 'hosted';
+
+    const firstField = sourceElement.querySelector('input, select, textarea, button');
+    if (firstField instanceof HTMLElement) {
+        setTimeout(() => firstField.focus(), 0);
+    }
+}
+
+function openPromptModal({
+    title,
+    label,
+    initialValue = '',
+    inputType = 'number',
+    inputStep = '0.01',
+    placeholder = '',
+    confirmText = 'Save'
+}) {
+    const { wrap, title: titleNode, body } = getAppModalElements();
+    if (!wrap || !titleNode || !body) {
+        return Promise.resolve(null);
+    }
+
+    closeAppModalImmediate();
+    titleNode.innerText = title || 'Adjust';
+    wrap.classList.remove('hidden');
+    wrap.style.display = 'flex';
+    appModalState.mode = 'prompt';
+
+    return new Promise((resolve) => {
+        const inputId = `appModalInput_${Date.now()}`;
+        const confirm = () => {
+            const value = document.getElementById(inputId)?.value ?? '';
+            closeAppModalImmediate();
+            resolve(String(value));
+        };
+        const cancel = () => {
+            closeAppModalImmediate();
+            resolve(null);
+        };
+
+        appModalState.dismissHandler = cancel;
+
+        body.innerHTML = `
+            <div style="display:grid; gap:14px;">
+                <label for="${inputId}" style="font-size:13px; color:#475569; font-weight:600;">${label}</label>
+                <input id="${inputId}" type="${inputType}" step="${inputStep}" value="${escapeHtml(initialValue)}" placeholder="${escapeHtml(placeholder)}" style="padding:12px; border:1px solid #cbd5e1; border-radius:10px;">
+                <div style="display:flex; justify-content:flex-end; gap:10px;">
+                    <button type="button" class="btn" id="appModalCancelBtn" style="background:#e2e8f0; color:#334155;">Cancel</button>
+                    <button type="button" class="btn btn-success" id="appModalConfirmBtn">${confirmText}</button>
+                </div>
+            </div>
+        `;
+
+        document.getElementById('appModalCancelBtn')?.addEventListener('click', cancel);
+        document.getElementById('appModalConfirmBtn')?.addEventListener('click', confirm);
+        const input = document.getElementById(inputId);
+        if (input) {
+            setTimeout(() => {
+                input.focus();
+                if (input.select) input.select();
+            }, 0);
+            input.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    confirm();
+                }
+                if (event.key === 'Escape') {
+                    event.preventDefault();
+                    cancel();
+                }
+            });
+        }
+    });
 }
 
 function getDraftedClosingQty(productId, fallback = 0) {
@@ -3342,6 +3478,15 @@ window.calcSalesRow = (element) => {
     recalculateSalesTotals();
 };
 
+window.dismissAppModal = () => {
+    if (typeof appModalState.dismissHandler === 'function') {
+        appModalState.dismissHandler();
+        return;
+    }
+
+    closeAppModalImmediate();
+};
+
 window.filterSales = () => {
     const searchTerm = document.getElementById('salesSearch').value.toLowerCase();
     const rows = Array.from(document.querySelectorAll('#salesBody tr'));
@@ -3726,6 +3871,7 @@ window.editSellingProduct = (id) => {
     document.getElementById('prodFormTitle').innerText = 'Edit Selling Item';
     document.getElementById('cancelProdBtn').style.display = 'inline-block';
     document.getElementById('saveProdBtn').innerText = 'Update Product';
+    openHostedModal('Edit Selling Item', 'finishedProductsFormCard', () => window.resetProductForm());
 };
 
 window.resetProductForm = () => {
@@ -3736,6 +3882,9 @@ window.resetProductForm = () => {
     document.getElementById('prodFormTitle').innerText = 'Add New Selling Item';
     document.getElementById('cancelProdBtn').style.display = 'none';
     document.getElementById('saveProdBtn').innerText = 'Save Product';
+    if (appModalState.sourceId === 'finishedProductsFormCard') {
+        closeAppModalImmediate();
+    }
 };
 
 window.resetRecipeForm = () => {
@@ -3753,6 +3902,10 @@ window.resetRecipeForm = () => {
         if (ingredientSelect) ingredientSelect.value = '';
         if (quantityInput) quantityInput.value = '';
         updateIngredientUnitHint(i);
+    }
+
+    if (appModalState.sourceId === 'managerOnlyMatrix') {
+        closeAppModalImmediate();
     }
 };
 
@@ -3874,7 +4027,7 @@ window.editRecipe = (productName) => {
 
     productInput.value = productName || '';
     window.loadExistingRecipe(productName);
-    productInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    openHostedModal('Edit Recipe', 'managerOnlyMatrix', () => window.resetRecipeForm());
     productInput.focus();
 };
 
@@ -4003,10 +4156,14 @@ window.adjustKitchenProduction = async (productId) => {
         }
 
         const currentAddedQty = toNumber(item.added_today);
-        const response = prompt(
-            `Enter the corrected total added quantity for ${getDisplayProductName(item.name)}.`,
-            String(currentAddedQty)
-        );
+        const response = await openPromptModal({
+            title: 'Adjust Kitchen Production',
+            label: `Enter the corrected total added quantity for ${getDisplayProductName(item.name)}.`,
+            initialValue: String(currentAddedQty),
+            inputType: 'number',
+            inputStep: '0.01',
+            confirmText: 'Save Adjustment'
+        });
 
         if (response === null) {
             return;
@@ -4726,10 +4883,14 @@ window.adjustStoreStockLevel = async (materialId) => {
 
         const currentStock = toNumber(material.stock_level ?? material.current_stock);
         const unitLabel = material.store_unit || 'units';
-        const response = prompt(
-            `Enter the corrected stock level for ${getDisplayMaterialName(material.name)} in ${unitLabel}.`,
-            String(currentStock)
-        );
+        const response = await openPromptModal({
+            title: 'Adjust Store Stock',
+            label: `Enter the corrected stock level for ${getDisplayMaterialName(material.name)} in ${unitLabel}.`,
+            initialValue: String(currentStock),
+            inputType: 'number',
+            inputStep: '0.01',
+            confirmText: 'Save Adjustment'
+        });
 
         if (response === null) {
             return;
@@ -5115,6 +5276,9 @@ window.resetStaffForm = () => {
     document.getElementById('staffFormTitle').innerText = 'Update Staff Profile';
     document.getElementById('saveStaffBtn').innerText = 'Save Profile';
     document.getElementById('cancelStaffBtn').style.display = 'none';
+    if (appModalState.sourceId === 'staffFormCard') {
+        closeAppModalImmediate();
+    }
 };
 
 window.editStaffUser = async (profileId) => {
@@ -5137,6 +5301,7 @@ window.editStaffUser = async (profileId) => {
         document.getElementById('staffFormTitle').innerText = 'Edit Staff Profile';
         document.getElementById('saveStaffBtn').innerText = 'Update Profile';
         document.getElementById('cancelStaffBtn').style.display = 'inline-block';
+        openHostedModal('Edit Staff Profile', 'staffFormCard', () => window.resetStaffForm());
     } catch (error) {
         handleError(error, 'Failed to load staff profile');
     }
@@ -5221,6 +5386,9 @@ window.resetRawForm = () => {
     document.getElementById('cancelRawBtn').style.display = 'none';
     document.getElementById('saveRawBtn').innerText = 'Save Material';
     updateRawMaterialNameHint();
+    if (appModalState.sourceId === 'rawMaterialFormCard') {
+        closeAppModalImmediate();
+    }
 };
 
 window.editRawMaterial = (id) => {
@@ -5240,6 +5408,7 @@ window.editRawMaterial = (id) => {
     document.getElementById('cancelRawBtn').style.display = 'inline-block';
     document.getElementById('saveRawBtn').innerText = 'Update Material';
     updateRawMaterialNameHint();
+    openHostedModal('Edit Raw Material', 'rawMaterialFormCard', () => window.resetRawForm());
 };
 
 window.checkRawMaterialNameMatch = () => {
