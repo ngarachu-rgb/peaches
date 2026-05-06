@@ -20,6 +20,10 @@ let productImportRows = [];
 let recipeImportRows = [];
 let currentAuditReport = null;
 let appToastTimer = null;
+let idleLogoutTimer = null;
+let idleWarningTimer = null;
+let idleMonitorBound = false;
+let idleLogoutInProgress = false;
 const appModalState = {
     sourceId: '',
     sourceElement: null,
@@ -41,6 +45,9 @@ const NAV_BUTTONS = {
 };
 
 const SHOW_STARTUP_IMPORT_TOOLS = false;
+const IDLE_LOGOUT_MS = 30 * 60 * 1000;
+const IDLE_WARNING_MS = 25 * 60 * 1000;
+const IDLE_ACTIVITY_EVENTS = ['click', 'keydown', 'input', 'mousemove', 'touchstart', 'scroll'];
 
 function toNumber(value) {
     const normalized = Number(value);
@@ -127,6 +134,57 @@ function showAppToast(message, type = 'success') {
     appToastTimer = setTimeout(() => {
         toast.classList.remove('show');
     }, 2400);
+}
+
+function clearIdleTimers() {
+    if (idleLogoutTimer) {
+        clearTimeout(idleLogoutTimer);
+        idleLogoutTimer = null;
+    }
+    if (idleWarningTimer) {
+        clearTimeout(idleWarningTimer);
+        idleWarningTimer = null;
+    }
+}
+
+function resetIdleLogoutTimer() {
+    if (!state.user?.id || idleLogoutInProgress) return;
+
+    clearIdleTimers();
+    idleWarningTimer = setTimeout(() => {
+        showAppToast('You will be logged out soon due to inactivity.', 'success');
+    }, IDLE_WARNING_MS);
+
+    idleLogoutTimer = setTimeout(async () => {
+        if (idleLogoutInProgress) return;
+        idleLogoutInProgress = true;
+        clearIdleTimers();
+        alert('You have been logged out due to 30 minutes of inactivity.');
+        await window.handleLogout(true);
+    }, IDLE_LOGOUT_MS);
+}
+
+function stopIdleLogoutMonitor() {
+    clearIdleTimers();
+
+    if (idleMonitorBound) {
+        IDLE_ACTIVITY_EVENTS.forEach((eventName) => {
+            window.removeEventListener(eventName, resetIdleLogoutTimer);
+        });
+        idleMonitorBound = false;
+    }
+}
+
+function startIdleLogoutMonitor() {
+    stopIdleLogoutMonitor();
+    idleLogoutInProgress = false;
+
+    IDLE_ACTIVITY_EVENTS.forEach((eventName) => {
+        window.addEventListener(eventName, resetIdleLogoutTimer, { passive: true });
+    });
+
+    idleMonitorBound = true;
+    resetIdleLogoutTimer();
 }
 
 function getAppModalElements() {
@@ -3300,6 +3358,7 @@ async function initApp() {
     await refreshCoreData();
     updateSidebarUserSummary();
     updatePageBranchLabels();
+    startIdleLogoutMonitor();
     await window.showPage(getDefaultPage());
 }
 
@@ -3347,7 +3406,10 @@ window.handleLogin = async () => {
     }
 };
 
-window.handleLogout = async () => {
+window.handleLogout = async (skipAlert = false) => {
+    stopIdleLogoutMonitor();
+    idleLogoutInProgress = true;
+    closeAppModalImmediate();
     await repositories.signOut();
     resetAppState();
     location.reload();
