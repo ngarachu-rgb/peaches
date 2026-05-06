@@ -20,9 +20,10 @@ let productImportRows = [];
 let recipeImportRows = [];
 let currentAuditReport = null;
 let appToastTimer = null;
-let idleLogoutTimer = null;
+let idleLogoutInterval = null;
 let idleMonitorBound = false;
 let idleLogoutInProgress = false;
+let lastUserActivityAt = 0;
 const appModalState = {
     sourceId: '',
     sourceElement: null,
@@ -45,7 +46,8 @@ const NAV_BUTTONS = {
 
 const SHOW_STARTUP_IMPORT_TOOLS = false;
 const IDLE_LOGOUT_MS = 30 * 60 * 1000;
-const IDLE_ACTIVITY_EVENTS = ['click', 'keydown', 'input', 'mousemove', 'touchstart', 'scroll'];
+const IDLE_CHECK_INTERVAL_MS = 30 * 1000;
+const IDLE_ACTIVITY_EVENTS = ['click', 'keydown', 'input', 'change', 'focusin', 'pointerdown', 'mousedown', 'touchstart', 'touchmove', 'scroll'];
 
 function toNumber(value) {
     const normalized = Number(value);
@@ -135,22 +137,24 @@ function showAppToast(message, type = 'success') {
 }
 
 function clearIdleTimers() {
-    if (idleLogoutTimer) {
-        clearTimeout(idleLogoutTimer);
-        idleLogoutTimer = null;
+    if (idleLogoutInterval) {
+        clearInterval(idleLogoutInterval);
+        idleLogoutInterval = null;
     }
 }
 
-function resetIdleLogoutTimer() {
+function markUserActivity() {
     if (!state.user?.id || idleLogoutInProgress) return;
+    lastUserActivityAt = Date.now();
+}
 
-    clearIdleTimers();
-    idleLogoutTimer = setTimeout(async () => {
-        if (idleLogoutInProgress) return;
-        idleLogoutInProgress = true;
-        clearIdleTimers();
-        await window.handleLogout(true);
-    }, IDLE_LOGOUT_MS);
+async function checkIdleLogout() {
+    if (!state.user?.id || idleLogoutInProgress || !lastUserActivityAt) return;
+    if ((Date.now() - lastUserActivityAt) < IDLE_LOGOUT_MS) return;
+
+    idleLogoutInProgress = true;
+    stopIdleLogoutMonitor();
+    await window.handleLogout(true);
 }
 
 function stopIdleLogoutMonitor() {
@@ -158,8 +162,9 @@ function stopIdleLogoutMonitor() {
 
     if (idleMonitorBound) {
         IDLE_ACTIVITY_EVENTS.forEach((eventName) => {
-            window.removeEventListener(eventName, resetIdleLogoutTimer);
+            document.removeEventListener(eventName, markUserActivity, true);
         });
+        window.removeEventListener('focus', markUserActivity, true);
         idleMonitorBound = false;
     }
 }
@@ -167,13 +172,17 @@ function stopIdleLogoutMonitor() {
 function startIdleLogoutMonitor() {
     stopIdleLogoutMonitor();
     idleLogoutInProgress = false;
+    lastUserActivityAt = Date.now();
 
     IDLE_ACTIVITY_EVENTS.forEach((eventName) => {
-        window.addEventListener(eventName, resetIdleLogoutTimer, { passive: true });
+        document.addEventListener(eventName, markUserActivity, true);
     });
+    window.addEventListener('focus', markUserActivity, true);
 
     idleMonitorBound = true;
-    resetIdleLogoutTimer();
+    idleLogoutInterval = setInterval(() => {
+        checkIdleLogout().catch((error) => console.error('Idle logout failed', error));
+    }, IDLE_CHECK_INTERVAL_MS);
 }
 
 function getAppModalElements() {
