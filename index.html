@@ -26,6 +26,56 @@
         }
         nav button { background: none; border: none; color: #bdc3c7; padding: 12px 25px; text-align: left; cursor: pointer; font-size: 14px; transition: 0.3s; }
         nav button:hover, nav button.active { background: #335a81; color: white; border-left: 4px solid var(--primary); }
+        .nav-group-toggle {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            width: 100%;
+            font-weight: 600;
+        }
+        .nav-group-toggle.active-parent {
+            background: #335a81;
+            color: white;
+            border-left: 4px solid var(--primary);
+        }
+        .nav-submenu {
+            display: flex;
+            flex-direction: column;
+            padding: 4px 0 8px;
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+            margin-bottom: 6px;
+        }
+        .nav-submenu.hidden {
+            display: none;
+        }
+        .nav-subbutton {
+            padding: 10px 25px 10px 42px;
+            font-size: 13px;
+            color: #d8e1ea;
+            position: relative;
+        }
+        .nav-subbutton::before {
+            content: '';
+            position: absolute;
+            left: 28px;
+            top: 50%;
+            width: 6px;
+            height: 6px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.28);
+            transform: translateY(-50%);
+        }
+        .nav-subbutton.active::before,
+        .nav-subbutton:hover::before {
+            background: #ffffff;
+        }
+        .nav-chevron {
+            font-size: 12px;
+            transition: transform 0.2s ease;
+        }
+        .nav-group-toggle[aria-expanded="true"] .nav-chevron {
+            transform: rotate(90deg);
+        }
         main { flex: 1; padding: 30px; overflow-y: auto; min-height: 0; position: relative; }
         .hidden { display: none !important; }
         .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 20px; }
@@ -338,12 +388,18 @@
         </select>
     </div>
     <button id="navSales" onclick="showPage('salesPage')" class="active">Daily Sales</button>
-    <button id="navKitchen" onclick="showPage('kitchenPage')">Kitchen Ops</button>
-    <button id="navProducts" onclick="showPage('finishedProductsPage')">Finished Products</button>
+    <button id="navStocks" onclick="showPage('stocksPage')">Stocks Page</button>
     <button id="navReports" class="nav-btn" onclick="showPage('reportsPage')"><i class="fas fa-chart-line"></i> Reports & Audit </button>
-    <button id="navStocks" onclick="showPage('stocksPage')">Store Stocks</button>
-    <button id="navStore" onclick="showPage('storePage')">Raw Items List</button>
-    <button id="navMatrix" onclick="showPage('matrixPage')">Inventory Matrix</button>
+    <button id="navKitchen" onclick="showPage('kitchenPage')">Kitchen Ops</button>
+    <button id="navInventoryToggle" class="nav-group-toggle" type="button" onclick="toggleInventoryNavGroup()" aria-expanded="false">
+        <span>Master Inventory</span>
+        <span class="nav-chevron">▸</span>
+    </button>
+    <div id="navInventoryGroup" class="nav-submenu hidden">
+        <button id="navProducts" class="nav-subbutton" onclick="showPage('finishedProductsPage')">Sales Item List</button>
+        <button id="navStore" class="nav-subbutton" onclick="showPage('storePage')">Raw Items List</button>
+        <button id="navMatrix" class="nav-subbutton" onclick="showPage('matrixPage')">Inventory Matrix</button>
+    </div>
     <button id="navStaff" onclick="showPage('staffPage')" class="hidden">Staff Management</button>
     <button id="navAccount" onclick="showPage('accountPage')">My Account</button>
 </nav>
@@ -410,11 +466,11 @@
 <div id="finishedProductsPage" class="page">
     <div class="card" style="border-left: 5px solid var(--success);">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-            <h2 style="font-size: 2em; font-weight: bold;">Finished Products Master</h2>
+            <h2 id="finishedProductsPageTitle" style="font-size: 2em; font-weight: bold;">Sales Item List</h2>
         </div>
         
         <div id="finishedProductsFormCard" style="background: #f0fdf4; padding: 20px; border-radius: 8px; margin-bottom: 30px;">
-            <h4 id="prodFormTitle" style="margin-top:0;">Add New Selling Item</h4>
+            <h4 id="prodFormTitle" style="margin-top:0;">Add New Sales Item</h4>
             <input type="hidden" id="productId"> 
             <div class="recon-grid">
                 <div>
@@ -625,7 +681,7 @@
     <div id="storePage" class="page">
         <div class="card" style="border-left: 5px solid #7092ae; padding-top: 14px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                <h2 style="font-size: 2em; font-weight: bold; margin: 0;">Raw Materials Master</h2>
+                <h2 id="storePageTitle" style="font-size: 2em; font-weight: bold; margin: 0;">Raw Items List</h2>
             </div>
             
             <div id="rawMaterialFormCard" style="background: #edf2f7; padding: 14px 16px 12px; border-radius: 8px; margin-bottom: 18px;">
@@ -1070,7 +1126,7 @@
 
     <div id="matrixPage" class="page">
         <div class="card">
-            <h2>Production Matrix (Recipes)</h2>
+            <h2 id="matrixPageTitle">Inventory Matrix</h2>
             <div id="managerOnlyMatrix" class="card">
                 <div class="recon-grid">
                     <div>

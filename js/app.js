@@ -43,6 +43,8 @@ const NAV_BUTTONS = {
     staffPage: 'navStaff',
     accountPage: 'navAccount'
 };
+const INVENTORY_PAGE_IDS = ['finishedProductsPage', 'storePage', 'matrixPage'];
+let inventoryNavExpanded = false;
 
 const SHOW_STARTUP_IMPORT_TOOLS = false;
 const IDLE_LOGOUT_MS = 30 * 60 * 1000;
@@ -56,6 +58,43 @@ function toNumber(value) {
 
 function formatMoney(value) {
     return toNumber(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function getActivePageId() {
+    return document.querySelector('.page.active')?.id || '';
+}
+
+function setInventoryNavExpanded(expanded) {
+    inventoryNavExpanded = expanded;
+    const group = document.getElementById('navInventoryGroup');
+    const toggle = document.getElementById('navInventoryToggle');
+    if (group) {
+        group.classList.toggle('hidden', !expanded);
+    }
+    if (toggle) {
+        toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    }
+}
+
+function updateSidebarNavState(activePageId) {
+    document.querySelectorAll('nav button').forEach((button) => {
+        button.classList.remove('active', 'active-parent');
+    });
+
+    const activeButtonId = NAV_BUTTONS[activePageId];
+    if (activeButtonId) {
+        document.getElementById(activeButtonId)?.classList.add('active');
+    }
+
+    const onInventoryPage = INVENTORY_PAGE_IDS.includes(activePageId);
+    const inventoryToggle = document.getElementById('navInventoryToggle');
+    if (inventoryToggle) {
+        inventoryToggle.classList.toggle('active-parent', onInventoryPage);
+    }
+
+    if (onInventoryPage) {
+        setInventoryNavExpanded(true);
+    }
 }
 
 function escapeHtml(value) {
@@ -766,6 +805,16 @@ function applyRoleAccess() {
         if (!button) return;
         button.classList.toggle('hidden', !canAccessPage(pageId));
     });
+
+    const inventoryToggle = document.getElementById('navInventoryToggle');
+    const inventoryGroup = document.getElementById('navInventoryGroup');
+    const hasInventoryAccess = INVENTORY_PAGE_IDS.some((pageId) => canAccessPage(pageId));
+    if (inventoryToggle) {
+        inventoryToggle.classList.toggle('hidden', !hasInventoryAccess);
+    }
+    if (inventoryGroup) {
+        inventoryGroup.classList.toggle('hidden', !hasInventoryAccess || !inventoryNavExpanded);
+    }
 
     const financialButton = document.getElementById('btnFinancialReports');
     if (financialButton) {
@@ -5042,9 +5091,7 @@ window.showPage = async (id) => {
 
     document.querySelectorAll('.page').forEach((page) => page.classList.remove('active'));
     document.getElementById(id).classList.add('active');
-    document.querySelectorAll('nav button').forEach((button) => {
-        button.classList.toggle('active', (button.getAttribute('onclick') || '').includes(id));
-    });
+    updateSidebarNavState(id);
 
       try {
           if (id === 'finishedProductsPage' || id === 'salesPage') {
@@ -5112,6 +5159,13 @@ window.showPage = async (id) => {
   };
 
 window.updateDropdowns = updateDropdowns;
+window.toggleInventoryNavGroup = () => {
+    if (INVENTORY_PAGE_IDS.includes(getActivePageId())) {
+        setInventoryNavExpanded(true);
+        return;
+    }
+    setInventoryNavExpanded(!inventoryNavExpanded);
+};
 window.switchStocksView = async (view) => {
     if (view === 'transfers') {
         try {
