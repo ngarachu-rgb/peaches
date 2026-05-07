@@ -368,12 +368,15 @@
                 <div style="font-size: 12px; color:#000409; text-transform:uppercase; letter-spacing:0.04em;">Reporting Date</div>
                 <div id="salesCurrentDate" style="font-size:16px; font-weight:700; color:#6be61a;">--</div>
             </div>
+            <div style="display:flex; align-items:center; gap:8px; background:#f8fafc; border:1px solid #d7e1eb; border-radius:10px; padding:8px 12px; min-width:120px;">
+                <div style="font-size: 12px; color:#000409; text-transform:uppercase; letter-spacing:0.04em;">Shift</div>
+                <div id="salesCurrentShift" style="font-size:16px; font-weight:700; color:#274c77;">--</div>
+            </div>
             <div style="flex:1; min-width:180px; max-width:280px;">
                 <input type="text" id="salesSearch" placeholder="Search item" oninput="filterSales()"
                     style="border-radius: 12px; padding: 8px 14px; border: 1px solid #7092ae; min-height: 40px;">
             </div>
         </div>
-        <div id="salesCurrentShift" class="hidden">--</div>
         
         <table id="salesTable" style="display: table; border: none;">
             <thead>

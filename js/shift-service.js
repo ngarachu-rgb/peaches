@@ -371,6 +371,8 @@ async function closeDirectSalesShift(context, repositories, currentShift, payloa
         const nextSeed = getNextShiftSeed(closedShift, context.shiftSystem);
         const nextShiftResult = await repositories.createShift(context, {
             created_at: new Date(`${nextSeed.shiftDate}T00:00:00Z`).toISOString(),
+            shift_date: nextSeed.shiftDate,
+            shift_type: nextSeed.shiftType,
             cash_at_hand: finance.cashAtHand,
             mpesa_float: finance.mpesaClosing,
             mpesa_closing: 0,
@@ -487,6 +489,8 @@ export async function ensureActiveShift(context, repositories) {
     const nextSeed = getNextShiftSeed(latestClosedShift, context.shiftSystem);
     const { data: newShift, error: createError } = await repositories.createShift(context, {
         created_at: new Date(`${nextSeed.shiftDate}T00:00:00Z`).toISOString(),
+        shift_date: nextSeed.shiftDate,
+        shift_type: nextSeed.shiftType,
         cash_at_hand: nextSeed.cashBf,
         mpesa_float: nextSeed.mpesaBf,
         mpesa_closing: 0,
@@ -933,6 +937,8 @@ export async function closeShiftWithCarryForward(context, repositories, currentS
         const nextSeed = getNextShiftSeed(closedShift, context.shiftSystem);
         const nextShiftResult = await repositories.createShift(context, {
             created_at: new Date(`${nextSeed.shiftDate}T00:00:00Z`).toISOString(),
+            shift_date: nextSeed.shiftDate,
+            shift_type: nextSeed.shiftType,
             cash_at_hand: finance.cashAtHand,
             mpesa_float: finance.mpesaClosing,
             mpesa_closing: 0,
