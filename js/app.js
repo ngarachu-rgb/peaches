@@ -2015,6 +2015,10 @@ function renderKitchen() {
 }
 
 function shouldDisplaySalesItem(item) {
+    const isRestaurantDirectItem = !isDirectSalesMode() && String(item?.sale_mode || '').toLowerCase() === 'direct';
+    if (isRestaurantDirectItem && toNumber(item?.available_stock) > 0) {
+        return true;
+    }
     return toNumber(item?.bbf) > 0 || toNumber(item?.added_today) > 0;
 }
 
