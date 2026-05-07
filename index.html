@@ -76,6 +76,63 @@
         .nav-group-toggle[aria-expanded="true"] .nav-chevron {
             transform: rotate(90deg);
         }
+        .manual-search-input {
+            width: 100%;
+            max-width: 460px;
+            padding: 12px 14px;
+            border: 1px solid #cbd5e1;
+            border-radius: 10px;
+            font-size: 14px;
+            background: #ffffff;
+        }
+        .manual-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 16px;
+        }
+        .manual-card {
+            background: #ffffff;
+            border: 1px solid #dbe4ee;
+            border-radius: 14px;
+            padding: 18px;
+            box-shadow: 0 6px 16px rgba(15, 23, 42, 0.05);
+        }
+        .manual-card h3 {
+            margin: 0 0 8px 0;
+            color: #1f2937;
+            font-size: 18px;
+        }
+        .manual-card p {
+            margin: 0 0 10px 0;
+            color: #475569;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        .manual-card ol {
+            margin: 0 0 10px 18px;
+            padding: 0;
+            color: #1f2937;
+            font-size: 13px;
+            line-height: 1.55;
+        }
+        .manual-chip-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 8px;
+        }
+        .manual-chip {
+            display: inline-flex;
+            align-items: center;
+            padding: 5px 9px;
+            border-radius: 999px;
+            background: #eff6ff;
+            color: #1d4ed8;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+            text-transform: uppercase;
+        }
         main { flex: 1; padding: 30px; overflow-y: auto; min-height: 0; position: relative; }
         .hidden { display: none !important; }
         .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 20px; }
@@ -402,6 +459,7 @@
     </div>
     <button id="navStaff" onclick="showPage('staffPage')" class="hidden">Staff Management</button>
     <button id="navAccount" onclick="showPage('accountPage')">My Account</button>
+    <button id="navManual" onclick="showPage('manualPage')">Operation Manual</button>
 </nav>
 
 <main>
@@ -1406,6 +1464,26 @@
                     <button class="btn btn-primary" id="changePasswordBtn" onclick="changeMyPassword()">Update Password</button>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <div id="manualPage" class="page">
+        <div class="card">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap; margin-bottom:18px;">
+                <div>
+                    <h2 style="margin:0 0 6px 0;">Operation Manual</h2>
+                    <p style="margin:0; color:#64748b; max-width:760px;">Search this guide to learn the main workflows for receiving stock, kitchen production, sales entry, finance reconciliation, closing shifts, shift recall, PDF export, corrections, and everyday branch operations.</p>
+                </div>
+                <input
+                    type="text"
+                    id="manualSearch"
+                    name="manualSearch"
+                    class="manual-search-input"
+                    placeholder="Search workflows, pages, actions, reports, or keywords"
+                    oninput="filterOperationManual()">
+            </div>
+            <div id="manualSearchStatus" style="font-size:13px; color:#64748b; margin-bottom:14px;">Type to filter the manual. Search works across section titles, steps, keywords, and notes.</div>
+            <div id="manualContent" class="manual-grid"></div>
         </div>
     </div>
 

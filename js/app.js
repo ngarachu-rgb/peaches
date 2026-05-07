@@ -41,10 +41,169 @@ const NAV_BUTTONS = {
     storePage: 'navStore',
     matrixPage: 'navMatrix',
     staffPage: 'navStaff',
-    accountPage: 'navAccount'
+    accountPage: 'navAccount',
+    manualPage: 'navManual'
 };
 const INVENTORY_PAGE_IDS = ['finishedProductsPage', 'storePage', 'matrixPage'];
 let inventoryNavExpanded = false;
+const OPERATION_MANUAL_SECTIONS = [
+    {
+        title: 'Logging In And Choosing A Branch',
+        summary: 'How a user enters the app and confirms the correct branch and shift before working.',
+        steps: [
+            'Log in using your assigned username and password.',
+            'Check the sidebar for the active branch, reporting date, and shift label before entering any data.',
+            'If your role allows branch switching, use the branch selector and confirm you are in the correct branch before posting.',
+            'If something looks wrong, stop first and confirm the branch and shift before receiving stock or entering sales.'
+        ],
+        keywords: ['login', 'branch', 'shift', 'sidebar', 'date', 'start']
+    },
+    {
+        title: 'Receiving Items Into Stock',
+        summary: 'How to receive raw items, drinks, and other stock into the current branch and shift.',
+        steps: [
+            'Open Stocks Page and stay on Receive Items.',
+            'Choose the stock item, enter the received quantity, and enter the total received cost.',
+            'Confirm the receipt total matches the supplier delivery note or invoice before posting.',
+            'Click Record Receipts. The stock is added to store stock and the receipt appears in current-shift receipt history.'
+        ],
+        keywords: ['receive items', 'stock receipt', 'invoice', 'delivery', 'cost', 'stocks page']
+    },
+    {
+        title: 'Receiving Operating Supplies',
+        summary: 'How to receive non-production items such as soaps, towels, or other consumables.',
+        steps: [
+            'Open Stocks Page and switch to Receive Supplies.',
+            'Start typing the supply name. Select an existing supply or keep typing to create a new one on save.',
+            'Enter category, unit, quantity, cost, and any notes.',
+            'Save the receipt. The item is stored separately from raw materials and can be reported later in finance reports.'
+        ],
+        keywords: ['supplies', 'soap', 'towels', 'consumables', 'receive supplies', 'operating supplies']
+    },
+    {
+        title: 'Kitchen Production',
+        summary: 'How restaurant branches convert raw materials into finished sale items through Kitchen Ops.',
+        steps: [
+            'Open Kitchen Ops and add the finished items produced during the shift.',
+            'Enter the quantity produced for each item and post the batch.',
+            'If one line fails, successful items are kept and removed from the draft while failed lines stay on screen for correction.',
+            'Use the Adjust button in the production summary before closing the shift if a posted quantity needs correction. The app will reverse or add the matching raw material usage automatically.'
+        ],
+        keywords: ['kitchen ops', 'production', 'chef', 'produce', 'adjust', 'raw material usage']
+    },
+    {
+        title: 'Restaurant Direct Sale Drinks',
+        summary: 'How drinks like soda or juice sell directly from store without going through Kitchen Ops.',
+        steps: [
+            'A restaurant item sells directly from store when it is in category Drinks, has a matching raw/store item, and has no recipe rows.',
+            'Such items appear in Daily Sales and are excluded from Kitchen Ops.',
+            'Receive stock first so the item has store availability for the current branch.',
+            'Enter the closing balance in Daily Sales like other direct-sale items.'
+        ],
+        keywords: ['restaurant drinks', 'direct sale', 'soda', 'juice', 'no kitchen', 'drinks']
+    },
+    {
+        title: 'Bar Issue To Shots And Glasses',
+        summary: 'How bar source bottles or packs are transferred into shots or glasses for sale.',
+        steps: [
+            'Open Stocks Page and switch to Issue To Shots.',
+            'Choose the source stock item, the target finished product, and the issued quantity in source units such as 1 bottle or 1 box.',
+            'Post the issue. Source store stock goes down and added stock increases on the target shot or glass item.',
+            'Check the issue history if you need to confirm or reverse a current-shift mistake.'
+        ],
+        keywords: ['issue to shots', 'bar', 'glasses', 'source bottle', 'wine', 'measured sales']
+    },
+    {
+        title: 'Daily Sales Entry',
+        summary: 'How closing balances are entered so the app calculates sold quantities and totals.',
+        steps: [
+            'Open Daily Sales and confirm the branch, date, and shift at the top.',
+            'Enter closing quantity or balance quantity for each visible item.',
+            'The app calculates sold quantity and total sales automatically from opening, added, issues, and closing quantities.',
+            'Rows with no opening stock and no additions are hidden automatically unless current logic makes them visible through direct stock availability.'
+        ],
+        keywords: ['daily sales', 'closing qty', 'sold qty', 'total sales', 'balance qty', 'cashier']
+    },
+    {
+        title: 'Financial Reconciliation',
+        summary: 'How to reconcile cash, M-Pesa, expenses, debts, and notes before closing a shift.',
+        steps: [
+            'Open Financial Reconciliation from Daily Sales when stock entry is complete.',
+            'Enter M-Pesa opening, M-Pesa closing, withdrawals if any, and cash at hand.',
+            'Add expense lines and debt lines where applicable.',
+            'Use the reconciliation notes field for anything important that needs to be remembered in shift recall.',
+            'Check the variance carefully. Negative variance means the cashier owes the company money.'
+        ],
+        keywords: ['finance', 'reconciliation', 'mpesa', 'cash', 'expenses', 'debts', 'variance', 'notes']
+    },
+    {
+        title: 'Closing And Posting A Shift',
+        summary: 'What happens when a shift is finalized and how to avoid common closing problems.',
+        steps: [
+            'Make sure all visible Daily Sales items have valid closing balances.',
+            'Make sure finance values are entered and reviewed.',
+            'Close the shift. The app saves inventory rows, finance totals, variance, and notes, then creates the next shift automatically.',
+            'For two-shift branches, closing DAY should create NIGHT on the same business date. Closing NIGHT creates the next DAY on the next date.'
+        ],
+        keywords: ['close shift', 'posting', 'next shift', 'day night', 'full shift', 'finalize']
+    },
+    {
+        title: 'Shift Recall And PDF Production',
+        summary: 'How to inspect a closed shift later and export it as a PDF report.',
+        steps: [
+            'Open Reports & Audit, then use Shift Recall or Shift Reports.',
+            'Choose the date range and open the exact shift you need.',
+            'Review the summary cards and the item detail table showing opening, added, closing, sold, price, and total.',
+            'Use Print PDF from the recall view when you need a printable record.'
+        ],
+        keywords: ['shift recall', 'reports', 'pdf', 'print', 'audit', 'history']
+    },
+    {
+        title: 'Stock Transfer Between Branches',
+        summary: 'How to move stock from one branch to another and what to verify after posting.',
+        steps: [
+            'Open Stocks Page and switch to Branch Stock Transfer.',
+            'Choose the destination branch, item, and quantity to transfer.',
+            'Post the transfer. The source stock goes down and the destination branch stock goes up.',
+            'Use transfer history to confirm the movement or correct a current-shift mistake if necessary.'
+        ],
+        keywords: ['branch transfer', 'transfer history', 'move stock', 'destination branch', 'source branch']
+    },
+    {
+        title: 'Adjustments And Corrections',
+        summary: 'Which correction tools exist and when they should be used.',
+        steps: [
+            'Managers can adjust current store stock levels from Current Store Stock Levels.',
+            'Managers can delete current-shift receipts, transfers, and issue-to-shots history entries to reverse mistakes safely.',
+            'Kitchen production lines can be adjusted before shift close and the raw material stock is recalculated automatically.',
+            'Deactivate an item instead of recreating a duplicate item when the same product should return later.'
+        ],
+        keywords: ['adjust stock', 'delete history', 'reverse', 'correction', 'deactivate', 'manager']
+    },
+    {
+        title: 'Reports Worth Checking Regularly',
+        summary: 'The most useful reports for managers and owners during daily control.',
+        steps: [
+            'Use Shift Reports for a quick list of closed shifts and their sales, M-Pesa, and variance.',
+            'Use Financial Reports for raw items received, operating supplies, expenses, debt summaries, transfer history, and sales reports.',
+            'Use Out of Stock Items to catch stock shortages early.',
+            'Use raw consumption and kitchen-versus-sales reports to investigate unusual usage patterns.'
+        ],
+        keywords: ['financial reports', 'shift reports', 'out of stock', 'sales summary', 'variance detail', 'audit export']
+    },
+    {
+        title: 'Good Daily Operating Habits',
+        summary: 'Simple rules that reduce errors and make shift close easier.',
+        steps: [
+            'Always confirm the branch and shift before receiving stock or entering sales.',
+            'Receive stock before selling it, and issue bar bottles to shots or glasses before selling measured items.',
+            'Avoid creating duplicate items. Reactivate old items when it is the same product.',
+            'Resolve obvious mistakes during the current shift instead of waiting until later.',
+            'Use Shift Recall whenever sales or balances look wrong.'
+        ],
+        keywords: ['best practice', 'new user', 'training', 'mistakes', 'control', 'comfort']
+    }
+];
 
 const SHOW_STARTUP_IMPORT_TOOLS = false;
 const IDLE_LOGOUT_MS = 30 * 60 * 1000;
@@ -111,6 +270,58 @@ function formatQuantity(value, maximumFractionDigits = 2) {
         minimumFractionDigits: 0,
         maximumFractionDigits
     });
+}
+
+function normalizeSearchText(value) {
+    return String(value || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
+}
+
+function renderOperationManual(query = '') {
+    const container = document.getElementById('manualContent');
+    const status = document.getElementById('manualSearchStatus');
+    if (!container || !status) return;
+
+    const normalizedQuery = normalizeSearchText(query);
+    const sections = OPERATION_MANUAL_SECTIONS.filter((section) => {
+        if (!normalizedQuery) return true;
+        const haystack = normalizeSearchText([
+            section.title,
+            section.summary,
+            ...(section.steps || []),
+            ...(section.keywords || [])
+        ].join(' '));
+        return haystack.includes(normalizedQuery);
+    });
+
+    status.innerText = normalizedQuery
+        ? `${sections.length} section${sections.length === 1 ? '' : 's'} match "${query}".`
+        : 'Type to filter the manual. Search works across section titles, steps, keywords, and notes.';
+
+    if (!sections.length) {
+        container.innerHTML = `
+            <div class="manual-card" style="grid-column:1 / -1; text-align:center;">
+                <h3 style="margin-bottom:6px;">No matching section found</h3>
+                <p>Try a simpler search like <strong>sales</strong>, <strong>kitchen</strong>, <strong>receipt</strong>, <strong>variance</strong>, or <strong>pdf</strong>.</p>
+            </div>
+        `;
+        return;
+    }
+
+    container.innerHTML = sections.map((section) => `
+        <section class="manual-card">
+            <h3>${escapeHtml(section.title)}</h3>
+            <p>${escapeHtml(section.summary)}</p>
+            <ol>
+                ${(section.steps || []).map((step) => `<li>${escapeHtml(step)}</li>`).join('')}
+            </ol>
+            <div class="manual-chip-row">
+                ${(section.keywords || []).map((keyword) => `<span class="manual-chip">${escapeHtml(keyword)}</span>`).join('')}
+            </div>
+        </section>
+    `).join('');
 }
 
 function hasMoreThanTwoDecimals(rawValue) {
@@ -5132,6 +5343,8 @@ window.showPage = async (id) => {
             await window.loadStaffProfiles();
         } else if (id === 'accountPage') {
             populateAccountPage();
+        } else if (id === 'manualPage') {
+            renderOperationManual(document.getElementById('manualSearch')?.value || '');
         } else if (id === 'financePage') {
               ensureFinanceDrafts();
               const carry = getCarryForwardBalances(state.currentShift);
@@ -5159,6 +5372,10 @@ window.showPage = async (id) => {
   };
 
 window.updateDropdowns = updateDropdowns;
+window.filterOperationManual = () => {
+    const query = document.getElementById('manualSearch')?.value || '';
+    renderOperationManual(query);
+};
 window.toggleInventoryNavGroup = () => {
     if (INVENTORY_PAGE_IDS.includes(getActivePageId())) {
         setInventoryNavExpanded(true);

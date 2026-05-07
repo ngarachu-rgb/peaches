@@ -93,7 +93,8 @@ export const PAGE_PERMISSIONS = {
     storePage: PERMISSIONS.MANAGE_RAW_MATERIALS,
     matrixPage: PERMISSIONS.MANAGE_RECIPES,
     staffPage: PERMISSIONS.MANAGE_STAFF,
-    accountPage: null
+    accountPage: null,
+    manualPage: null
 };
 
 const SUPERVISOR_VIEW_ONLY_PAGES = new Set([
