@@ -4359,7 +4359,7 @@ window.processStockReceipt = async () => {
         renderStockReceiptBatchInputs();
         showAppToast(`Recorded ${populatedRows.length} stock receipt${populatedRows.length === 1 ? '' : 's'} successfully.`);
         await loadStockReceipts();
-        await loadRawMaterials();
+        await loadInventory();
         updateDropdowns();
     } catch (error) {
         handleError(error, 'Failed to record stock');
