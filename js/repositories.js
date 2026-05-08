@@ -800,7 +800,10 @@ export function createRepositories(supabase) {
             const payload = rows.map((row) => attachBranchPayload(
                 'shift_store_checks',
                 context,
-                sanitizeShiftStoreCheckPayload(ensureRowId(row))
+                {
+                    restaurant_id: context?.restaurantId || null,
+                    ...sanitizeShiftStoreCheckPayload(ensureRowId(row))
+                }
             ));
             return supabase.from('shift_store_checks').upsert(payload, { onConflict: 'shift_id,material_id' });
         },
