@@ -724,6 +724,31 @@
             <div class="stat-box"><div class="stat-label">Variance</div><div id="varianceVal" class="stat-val" style="color:red">0.00</div></div>
         </div>
 
+        <div id="keyStoreCheckSection" class="hidden" style="margin-top:20px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:14px 16px;">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:10px; flex-wrap:wrap;">
+                <div>
+                    <div style="font-weight:700; color:#1e293b;">Key Store Balance Check</div>
+                    <div style="font-size:12px; color:#64748b;">Expected balance is based on opening stock plus receipts and transfers, minus kitchen consumption from matrix output. Actual balances are required before closing.</div>
+                </div>
+            </div>
+            <div id="keyStoreCheckStatus" style="font-size:12px; color:#64748b; margin-bottom:8px;"></div>
+            <div style="overflow-x:auto;">
+                <table id="keyStoreCheckTable" style="display:table; width:100%; border:none;">
+                    <thead>
+                        <tr>
+                            <th style="background:none; color:#7092ae; padding:8px 10px;">Item</th>
+                            <th style="background:none; color:#7092ae; padding:8px 10px;">Unit</th>
+                            <th style="background:none; color:#7092ae; padding:8px 10px;">Open</th>
+                            <th style="background:none; color:#7092ae; padding:8px 10px;">Expected</th>
+                            <th style="background:none; color:#7092ae; padding:8px 10px;">Actual</th>
+                            <th style="background:none; color:#7092ae; padding:8px 10px;">Var</th>
+                        </tr>
+                    </thead>
+                    <tbody id="keyStoreCheckBody"></tbody>
+                </table>
+            </div>
+        </div>
+
         <div style="margin-top:20px;">
             <div class="stat-label" style="margin-bottom:6px;">Reconciliation Notes</div>
             <textarea id="financeNotes" name="financeNotes" rows="1" class="auto-grow-textarea" placeholder="Add closing notes for this shift..." oninput="handleFinanceNotesInput(this)"></textarea>
@@ -781,6 +806,10 @@
                 <div class="raw-entry-save">
                     <button class="btn" id="saveRawBtn" onclick="saveRawMaterial()" style="background:#7092ae; color:white;">Save Material</button>
                     <button class="btn" id="cancelRawBtn" style="background:#95a5a6; color:white; display:none; margin-left:10px;" onclick="resetRawForm()">Cancel</button>
+                </div>
+                <div style="margin-top:8px; display:flex; align-items:center; gap:8px;">
+                    <input type="checkbox" id="rawIsKeyShiftItem" name="rawIsKeyShiftItem">
+                    <label for="rawIsKeyShiftItem" style="font-size:12px; color:#475569; margin:0;">Track as key restaurant shift store item</label>
                 </div>
                 <p style="font-size:11px; color:#7f8c8d; margin-top:8px; margin-bottom:0;">
                     Calculation: Store Unit Cost = Buy Price / Conv. Factor. (e.g. Buying 1 Bale (12x1KG Pkts) @ 1740. Store Unit Cost = 1740/12 = 145/KG)

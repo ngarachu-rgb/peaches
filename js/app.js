@@ -933,6 +933,8 @@ function resetBranchScopedDrafts() {
     state.currentShiftTotal = 0;
     state.currentShift = null;
     state.shiftSeed = null;
+    state.keyStoreChecks = [];
+    state.keyStoreCheckDrafts = {};
     state.salesDrafts = {};
     state.financeDraft = {
         mpesaOpening: '',
@@ -1732,6 +1734,27 @@ function usesDirectStockMath(item) {
     return String(item?.sale_mode || '').toLowerCase() === 'direct';
 }
 
+function isRestaurantKeyStoreCheckEnabled() {
+    return !isDirectSalesMode();
+}
+
+function getKeyShiftControlMaterials() {
+    return (state.rawMaterials || [])
+        .filter((material) => material?.is_key_shift_item === true)
+        .sort((left, right) => getDisplayMaterialName(left.name).localeCompare(getDisplayMaterialName(right.name)));
+}
+
+function getCurrentShiftWindowStartMs() {
+    return state.currentShift?.created_at ? new Date(state.currentShift.created_at).getTime() : 0;
+}
+
+function isCurrentShiftTimestamp(value) {
+    const shiftStart = getCurrentShiftWindowStartMs();
+    if (!shiftStart) return false;
+    const timestamp = value ? new Date(value).getTime() : 0;
+    return timestamp >= shiftStart;
+}
+
 function getKitchenEligibleItems() {
     return (state.items || []).filter((item) => String(item?.sale_mode || '').toLowerCase() !== 'direct');
 }
@@ -2129,6 +2152,185 @@ async function loadStockTransfers() {
     if (error) throw error;
     state.stockTransfers = data || [];
     renderStockTransferView();
+}
+
+async function ensureCurrentShiftKeyStoreChecks() {
+    if (!isRestaurantKeyStoreCheckEnabled() || !state.currentShift?.id) {
+        state.keyStoreChecks = [];
+        return;
+    }
+
+    const keyMaterials = getKeyShiftControlMaterials();
+    if (!keyMaterials.length) {
+        state.keyStoreChecks = [];
+        return;
+    }
+
+    const existingResult = await repositories.getShiftStoreChecks(getScope(), state.currentShift.id);
+    if (existingResult.error) throw existingResult.error;
+
+    const existingRows = existingResult.data || [];
+    const existingByMaterialId = new Map(existingRows.map((row) => [String(row.material_id || ''), row]));
+    const missingMaterials = keyMaterials.filter((material) => !existingByMaterialId.has(String(material.id)));
+
+    if (missingMaterials.length) {
+        const previousShiftResult = await repositories.getLatestClosedShift(getScope());
+        if (previousShiftResult.error) throw previousShiftResult.error;
+
+        const previousShiftId = previousShiftResult.data?.id || '';
+        let previousRows = [];
+        if (previousShiftId) {
+            const previousRowsResult = await repositories.getShiftStoreChecks(getScope(), previousShiftId);
+            if (previousRowsResult.error) throw previousRowsResult.error;
+            previousRows = previousRowsResult.data || [];
+        }
+
+        const previousByMaterialId = new Map(previousRows.map((row) => [String(row.material_id || ''), row]));
+        const seedRows = missingMaterials.map((material) => {
+            const previousRow = previousByMaterialId.get(String(material.id));
+            const openingQty = previousRow && previousRow.actual_closing_qty !== null && previousRow.actual_closing_qty !== undefined
+                ? toNumber(previousRow.actual_closing_qty)
+                : toNumber(material.stock_level ?? material.current_stock);
+
+            return {
+                shift_id: state.currentShift.id,
+                material_id: material.id,
+                material_name_snapshot: material.name,
+                store_unit_snapshot: material.store_unit || '',
+                opening_qty: openingQty,
+                actual_closing_qty: null,
+                expected_qty: null,
+                variance_qty: null,
+                notes: ''
+            };
+        });
+
+        if (seedRows.length) {
+            const upsertResult = await repositories.upsertShiftStoreChecks(getScope(), seedRows);
+            if (upsertResult.error) throw upsertResult.error;
+        }
+    }
+
+    const refreshedResult = await repositories.getShiftStoreChecks(getScope(), state.currentShift.id);
+    if (refreshedResult.error) throw refreshedResult.error;
+    state.keyStoreChecks = refreshedResult.data || [];
+}
+
+function getCurrentShiftTransfersForBranch() {
+    const currentBranchId = String(state.branchId || '');
+    return (state.stockTransfers || []).filter((row) => {
+        const inCurrentWindow = isCurrentShiftTimestamp(row.created_at);
+        if (!inCurrentWindow) return false;
+        return String(row.from_branch_id || '') === currentBranchId || String(row.to_branch_id || '') === currentBranchId;
+    });
+}
+
+function buildKeyStoreCheckRows() {
+    const keyMaterials = getKeyShiftControlMaterials();
+    const existingByMaterialId = new Map((state.keyStoreChecks || []).map((row) => [String(row.material_id || ''), row]));
+    const receiptRows = state.stockReceipts || [];
+    const transferRows = getCurrentShiftTransfersForBranch();
+    const recipeRows = state.recipeMatrix || [];
+    const items = state.items || [];
+
+    return keyMaterials.map((material) => {
+        const existingRow = existingByMaterialId.get(String(material.id)) || null;
+        const materialName = material.name;
+        const openingQty = toNumber(existingRow?.opening_qty ?? material.stock_level ?? material.current_stock);
+        const receivedQty = receiptRows
+            .filter((row) => entityNamesMatch(row.material_name, materialName))
+            .reduce((sum, row) => sum + toNumber(row.qty_posted_store ?? (toNumber(row.qty_received) * Math.max(toNumber(row.conversion_factor), 1))), 0);
+        const transferredInQty = transferRows
+            .filter((row) => String(row.to_branch_id || '') === String(state.branchId || '') && entityNamesMatch(row.material_name, materialName))
+            .reduce((sum, row) => sum + toNumber(row.qty), 0);
+        const transferredOutQty = transferRows
+            .filter((row) => String(row.from_branch_id || '') === String(state.branchId || '') && entityNamesMatch(row.material_name, materialName))
+            .reduce((sum, row) => sum + toNumber(row.qty), 0);
+        const kitchenConsumedQty = recipeRows.reduce((sum, recipe) => {
+            if (!entityNamesMatch(recipe.material_name, materialName)) {
+                return sum;
+            }
+            const item = items.find((entry) => entityNamesMatch(entry.name, recipe.finished_item_name));
+            return sum + (toNumber(item?.added_today) * toNumber(recipe.qty_per_unit));
+        }, 0);
+        const expectedQty = openingQty + receivedQty + transferredInQty - transferredOutQty - kitchenConsumedQty;
+        const draftValue = state.keyStoreCheckDrafts[String(material.id)];
+        const actualValue = draftValue !== undefined
+            ? draftValue
+            : (existingRow?.actual_closing_qty ?? '');
+        const actualQty = String(actualValue).trim() === '' ? null : toNumber(actualValue);
+        const varianceQty = actualQty === null ? null : actualQty - expectedQty;
+
+        return {
+            id: existingRow?.id || '',
+            materialId: material.id,
+            materialName,
+            unit: existingRow?.store_unit_snapshot || material.store_unit || '',
+            openingQty,
+            expectedQty,
+            actualValue,
+            actualQty,
+            varianceQty
+        };
+    });
+}
+
+function renderKeyStoreChecks() {
+    const section = document.getElementById('keyStoreCheckSection');
+    const body = document.getElementById('keyStoreCheckBody');
+    const status = document.getElementById('keyStoreCheckStatus');
+    if (!section || !body || !status) return;
+
+    if (!isRestaurantKeyStoreCheckEnabled()) {
+        section.classList.add('hidden');
+        body.innerHTML = '';
+        status.innerText = '';
+        return;
+    }
+
+    const rows = buildKeyStoreCheckRows();
+    if (!rows.length) {
+        section.classList.add('hidden');
+        body.innerHTML = '';
+        status.innerText = '';
+        return;
+    }
+
+    section.classList.remove('hidden');
+    status.innerText = 'Actual balances are mandatory for all key items before the shift can be closed.';
+    body.innerHTML = rows.map((row) => `
+        <tr style="border-bottom:1px solid #e2e8f0;">
+            <td style="padding:7px 10px; font-size:12px; font-weight:600;">${getDisplayMaterialName(row.materialName)}</td>
+            <td style="padding:7px 10px; font-size:12px;">${row.unit || '--'}</td>
+            <td style="padding:7px 10px; font-size:12px;">${formatQuantity(row.openingQty, 4)}</td>
+            <td style="padding:7px 10px; font-size:12px; font-weight:600; color:#1f2937;">${formatQuantity(row.expectedQty, 4)}</td>
+            <td style="padding:7px 10px;">
+                <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    id="keyStoreActual_${row.materialId}"
+                    value="${row.actualValue === null ? '' : row.actualValue}"
+                    oninput="updateKeyStoreCheckDraft('${row.materialId}', this.value)"
+                    style="width:88px; min-height:32px; padding:4px 8px; font-size:12px;">
+            </td>
+            <td id="keyStoreVar_${row.materialId}" style="padding:7px 10px; font-size:12px; font-weight:700; ${row.varianceQty === null ? 'color:#64748b;' : getVarianceDisplayStyle(row.varianceQty)}">${row.varianceQty === null ? '--' : formatQuantity(row.varianceQty, 4)}</td>
+        </tr>
+    `).join('');
+}
+
+function collectKeyStoreChecks() {
+    return buildKeyStoreCheckRows().map((row) => ({
+        id: row.id,
+        materialId: row.materialId,
+        materialName: row.materialName,
+        unit: row.unit,
+        openingQty: row.openingQty,
+        expectedQty: row.expectedQty,
+        actualClosingQty: row.actualQty,
+        hasActualEntry: row.actualQty !== null,
+        varianceQty: row.varianceQty
+    }));
 }
 
 async function loadBarStockIssues() {
@@ -4201,6 +4403,22 @@ window.handleFinanceNotesInput = (textarea) => {
     state.financeDraft.notes = textarea?.value || '';
 };
 
+window.updateKeyStoreCheckDraft = (materialId, value) => {
+    state.keyStoreCheckDrafts[String(materialId)] = value;
+    const row = buildKeyStoreCheckRows().find((entry) => String(entry.materialId) === String(materialId));
+    const varianceNode = document.getElementById(`keyStoreVar_${materialId}`);
+    if (varianceNode) {
+        varianceNode.innerText = row?.varianceQty === null ? '--' : formatQuantity(row.varianceQty, 4);
+        varianceNode.style.color = row?.varianceQty === null ? '#64748b' : '';
+        varianceNode.style.fontWeight = '700';
+        if (row?.varianceQty !== null) {
+            varianceNode.style.cssText = `padding:7px 10px; font-size:12px; font-weight:700; ${getVarianceDisplayStyle(row.varianceQty)}`;
+        } else {
+            varianceNode.style.cssText = 'padding:7px 10px; font-size:12px; font-weight:700; color:#64748b;';
+        }
+    }
+};
+
 window.editSellingProduct = (id) => {
     requirePermission(PERMISSIONS.MANAGE_PRODUCTS);
     const item = state.items.find((entry) => String(entry.product_id) === String(id));
@@ -5279,6 +5497,7 @@ window.finalizeShift = async () => {
         const finance = { ...getFinanceInputs() };
         const result = await closeShiftWithCarryForward(getScope(), repositories, state.currentShift, {
             inventoryRows: collectClosingRows(),
+            keyStoreChecks: collectKeyStoreChecks(),
             finance,
             expenseLines: finance.expenseLines,
             debtGivenLines: finance.debtGivenLines,
@@ -5363,6 +5582,10 @@ window.showPage = async (id) => {
         } else if (id === 'manualPage') {
             renderOperationManual(document.getElementById('manualSearch')?.value || '');
         } else if (id === 'financePage') {
+              await loadInventory();
+              await loadStockReceipts();
+              await loadStockTransfers();
+              await ensureCurrentShiftKeyStoreChecks();
               ensureFinanceDrafts();
               const carry = getCarryForwardBalances(state.currentShift);
               document.getElementById('mpesaOpening').value = state.financeDraft.mpesaOpening !== ''
@@ -5377,6 +5600,7 @@ window.showPage = async (id) => {
                   autoResizeTextarea(financeNotesInput);
               }
               renderFinanceLineItems();
+              renderKeyStoreChecks();
               window.calcRecon();
           }
           if (isSupervisorReadOnlyMasterPage(id)) {
@@ -5427,11 +5651,12 @@ window.saveRawMaterial = async () => {
         const conversionFactor = Math.max(toNumber(document.getElementById('convFactor').value), 1);
         const price = toNumber(document.getElementById('buyPrice').value);
         const reorderLevel = Math.max(toNumber(document.getElementById('reorderLevel').value), 0);
+        const isKeyShiftItem = document.getElementById('rawIsKeyShiftItem').checked;
         if (!rawName || price <= 0) throw new Error('Please enter a Material Name and Price.');
 
         const { error } = await repositories.saveRawMaterial(
             getScope(),
-            { name, buyUnit, storeUnit, conversionFactor, price, reorderLevel },
+            { name, buyUnit, storeUnit, conversionFactor, price, reorderLevel, isKeyShiftItem },
             id
         );
         if (error) throw error;
@@ -5734,6 +5959,7 @@ window.resetRawForm = () => {
     document.getElementById('convFactor').value = '1';
     document.getElementById('buyPrice').value = '';
     document.getElementById('reorderLevel').value = '';
+    document.getElementById('rawIsKeyShiftItem').checked = false;
     document.getElementById('rawFormTitle').innerText = 'Add New Raw Material';
     document.getElementById('cancelRawBtn').style.display = 'none';
     document.getElementById('saveRawBtn').innerText = 'Save Material';
@@ -5756,6 +5982,7 @@ window.editRawMaterial = (id) => {
     document.getElementById('convFactor').value = material.conversion_factor || 1;
     document.getElementById('buyPrice').value = material.price || '';
     document.getElementById('reorderLevel').value = material.reorder_level ?? '';
+    document.getElementById('rawIsKeyShiftItem').checked = material.is_key_shift_item === true;
     document.getElementById('rawFormTitle').innerText = 'Edit Raw Material';
     document.getElementById('cancelRawBtn').style.display = 'inline-block';
     document.getElementById('saveRawBtn').innerText = 'Update Material';

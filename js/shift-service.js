@@ -232,6 +232,76 @@ async function buildDirectSalesOpeningRows(context, repositories, shiftId, produ
     }));
 }
 
+async function buildRestaurantKeyStoreOpeningRows(context, repositories, shiftId, previousShiftId = '') {
+    const rawMaterialsResult = await repositories.getRawMaterials(context);
+    if (rawMaterialsResult.error) throw rawMaterialsResult.error;
+
+    const keyMaterials = (rawMaterialsResult.data || []).filter((material) => material?.is_key_shift_item === true);
+    if (!keyMaterials.length) return [];
+
+    let previousRows = [];
+    if (previousShiftId) {
+        const previousRowsResult = await repositories.getShiftStoreChecks(context, previousShiftId);
+        if (previousRowsResult.error) throw previousRowsResult.error;
+        previousRows = previousRowsResult.data || [];
+    }
+
+    const previousByMaterialId = new Map(previousRows.map((row) => [String(row.material_id || ''), row]));
+
+    return keyMaterials.map((material) => {
+        const previousRow = previousByMaterialId.get(String(material.id || ''));
+        const openingQty = previousRow && previousRow.actual_closing_qty !== null && previousRow.actual_closing_qty !== undefined
+            ? toNumber(previousRow.actual_closing_qty)
+            : toNumber(material.stock_level ?? material.current_stock);
+
+        return {
+            shift_id: shiftId,
+            material_id: material.id,
+            material_name_snapshot: material.name,
+            store_unit_snapshot: material.store_unit || '',
+            opening_qty: openingQty,
+            actual_closing_qty: null,
+            expected_qty: null,
+            variance_qty: null,
+            notes: '',
+            updated_at: new Date().toISOString()
+        };
+    });
+}
+
+async function ensureRestaurantKeyStoreChecks(context, repositories, shift, previousShiftId = '') {
+    if (context.operatingMode === 'DIRECT_SALES' || !shift?.id) {
+        return [];
+    }
+
+    const rawMaterialsResult = await repositories.getRawMaterials(context);
+    if (rawMaterialsResult.error) throw rawMaterialsResult.error;
+    const keyMaterials = (rawMaterialsResult.data || []).filter((material) => material?.is_key_shift_item === true);
+    if (!keyMaterials.length) return [];
+
+    const existingResult = await repositories.getShiftStoreChecks(context, shift.id);
+    if (existingResult.error) throw existingResult.error;
+    const existingRows = existingResult.data || [];
+    const existingByMaterialId = new Map(existingRows.map((row) => [String(row.material_id || ''), row]));
+    const missingMaterials = keyMaterials.filter((material) => !existingByMaterialId.has(String(material.id || '')));
+    if (!missingMaterials.length) {
+        return existingRows;
+    }
+
+    const openingRows = await buildRestaurantKeyStoreOpeningRows(context, repositories, shift.id, previousShiftId);
+    const missingRows = openingRows.filter((row) => !existingByMaterialId.has(String(row.material_id || '')));
+    if (!missingRows.length) {
+        return existingRows;
+    }
+
+    const upsertResult = await repositories.upsertShiftStoreChecks(context, missingRows);
+    if (upsertResult.error) throw upsertResult.error;
+
+    const refreshedResult = await repositories.getShiftStoreChecks(context, shift.id);
+    if (refreshedResult.error) throw refreshedResult.error;
+    return refreshedResult.data || [];
+}
+
 async function closeDirectSalesShift(context, repositories, currentShift, payload) {
     const inventoryRows = (payload.inventoryRows || []).map((row) => ({
         ...row,
@@ -471,7 +541,10 @@ export async function ensureActiveShift(context, repositories) {
         throw new Error(`Multiple open shifts were found. Resolve them before continuing. Open shift ids: ${shiftIds}`);
     }
 
-    if (openShifts?.[0]) return openShifts[0];
+    if (openShifts?.[0]) {
+        await ensureRestaurantKeyStoreChecks(context, repositories, openShifts[0]);
+        return openShifts[0];
+    }
 
     const { data: latestClosedShift, error: latestClosedError } = await repositories.getLatestClosedShift(context);
     if (latestClosedError) throw latestClosedError;
@@ -512,6 +585,8 @@ export async function ensureActiveShift(context, repositories) {
         const { error: inventoryError } = await repositories.upsertShiftInventoryRows(context, openingRows);
         if (inventoryError) throw inventoryError;
     }
+
+    await ensureRestaurantKeyStoreChecks(context, repositories, newShift, latestClosedShift?.id || '');
 
     return newShift;
 }
@@ -821,6 +896,13 @@ export async function closeShiftWithCarryForward(context, repositories, currentS
         accountedIncome,
         variance: calculateVariance(payload.finance.totalSales, accountedIncome)
     };
+    const keyStoreChecks = context.operatingMode === 'DIRECT_SALES'
+        ? []
+        : (payload.keyStoreChecks || []);
+
+    const keyStoreCheckErrors = keyStoreChecks
+        .filter((row) => !row.hasActualEntry)
+        .map((row) => `Enter key store closing balance for ${stripEntityCodePrefix(row.materialName || 'an item')} before closing the shift.`);
 
     const validationErrors = validateShiftCloseInput({
         currentShift,
@@ -828,8 +910,8 @@ export async function closeShiftWithCarryForward(context, repositories, currentS
         finance
     });
 
-    if (validationErrors.length > 0) {
-        throw new Error(validationErrors.join('\n'));
+    if (validationErrors.length > 0 || keyStoreCheckErrors.length > 0) {
+        throw new Error([...validationErrors, ...keyStoreCheckErrors].join('\n'));
     }
 
     const directStoreRows = inventoryRows.filter((row) => usesStoreStockDeduction(row));
@@ -917,6 +999,24 @@ export async function closeShiftWithCarryForward(context, repositories, currentS
         const { error: inventoryError } = await repositories.upsertShiftInventoryRows(context, closingRows);
         if (inventoryError) throw inventoryError;
 
+        if (keyStoreChecks.length > 0) {
+            const checkRows = keyStoreChecks.map((row) => ({
+                id: row.id || undefined,
+                shift_id: currentShift.id,
+                material_id: row.materialId,
+                material_name_snapshot: row.materialName,
+                store_unit_snapshot: row.unit || '',
+                opening_qty: row.openingQty,
+                actual_closing_qty: row.actualClosingQty,
+                expected_qty: row.expectedQty,
+                variance_qty: row.varianceQty,
+                notes: row.notes || '',
+                updated_at: timestamp
+            }));
+            const checkUpsertResult = await repositories.upsertShiftStoreChecks(context, checkRows);
+            if (checkUpsertResult.error) throw checkUpsertResult.error;
+        }
+
         const closeResult = await repositories.updateShift(currentShift.id, {
             total_sales: finance.totalSales,
             mpesa_float: finance.mpesaOpening,
@@ -966,6 +1066,23 @@ export async function closeShiftWithCarryForward(context, repositories, currentS
 
         const { error: nextInventoryError } = await repositories.upsertShiftInventoryRows(context, nextOpeningRows);
         if (nextInventoryError) throw nextInventoryError;
+
+        if (keyStoreChecks.length > 0) {
+            const nextCheckRows = keyStoreChecks.map((row) => ({
+                shift_id: nextShift.id,
+                material_id: row.materialId,
+                material_name_snapshot: row.materialName,
+                store_unit_snapshot: row.unit || '',
+                opening_qty: toNumber(row.actualClosingQty),
+                actual_closing_qty: null,
+                expected_qty: null,
+                variance_qty: null,
+                notes: '',
+                updated_at: timestamp
+            }));
+            const nextCheckUpsertResult = await repositories.upsertShiftStoreChecks(context, nextCheckRows);
+            if (nextCheckUpsertResult.error) throw nextCheckUpsertResult.error;
+        }
 
         return {
             closedShift,

@@ -18,6 +18,7 @@ export const state = {
     items: [],
     branches: [],
     rawMaterials: [],
+    keyStoreChecks: [],
     supplyItems: [],
     recipeMatrix: [],
     currentShiftTotal: 0,
@@ -43,7 +44,8 @@ export const state = {
     stockTransferDestinationBranchId: '',
     stockTransferDrafts: [],
     barStockIssues: [],
-    barIssueDrafts: []
+    barIssueDrafts: [],
+    keyStoreCheckDrafts: {}
   };
 
 function normalizeShiftSystemValue(value) {
@@ -126,6 +128,7 @@ export function resetAppState() {
     state.items = [];
     state.branches = [];
     state.rawMaterials = [];
+    state.keyStoreChecks = [];
     state.supplyItems = [];
     state.recipeMatrix = [];
     state.currentShiftTotal = 0;
@@ -152,4 +155,5 @@ export function resetAppState() {
     state.stockTransferDrafts = [];
     state.barStockIssues = [];
     state.barIssueDrafts = [];
+    state.keyStoreCheckDrafts = {};
   }

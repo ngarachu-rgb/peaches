@@ -1,6 +1,7 @@
 const TABLES_WITH_BRANCH = new Set([
     'inventory',
     'main_store',
+    'shift_store_checks',
     'supply_items',
     'supply_receipts',
     'recipes',
@@ -17,6 +18,7 @@ const TABLES_WITH_BRANCH = new Set([
 const BRANCH_READY_TABLES = new Set([
     'shifts',
     'main_store',
+    'shift_store_checks',
     'supply_items',
     'supply_receipts',
     'stock_receipts',
@@ -70,6 +72,21 @@ const LEGACY_SHIFT_INVENTORY_COLUMNS = [
     'created_at'
 ].join(', ');
 
+const LEGACY_SHIFT_STORE_CHECK_COLUMNS = [
+    'id',
+    'shift_id',
+    'material_id',
+    'material_name_snapshot',
+    'store_unit_snapshot',
+    'opening_qty',
+    'actual_closing_qty',
+    'expected_qty',
+    'variance_qty',
+    'notes',
+    'created_at',
+    'updated_at'
+].join(', ');
+
 function sanitizeShiftPayload(payload = {}) {
     const allowedKeys = new Set([
         'restaurant_id',
@@ -112,6 +129,31 @@ function sanitizeShiftInventoryPayload(payload = {}) {
         'sold_qty',
         'unit_price',
         'line_total'
+    ]);
+
+    const nextPayload = {};
+    Object.entries(payload).forEach(([key, value]) => {
+        if (allowedKeys.has(key)) {
+            nextPayload[key] = value;
+        }
+    });
+
+    return nextPayload;
+}
+
+function sanitizeShiftStoreCheckPayload(payload = {}) {
+    const allowedKeys = new Set([
+        'id',
+        'shift_id',
+        'material_id',
+        'material_name_snapshot',
+        'store_unit_snapshot',
+        'opening_qty',
+        'actual_closing_qty',
+        'expected_qty',
+        'variance_qty',
+        'notes',
+        'updated_at'
     ]);
 
     const nextPayload = {};
@@ -736,8 +778,54 @@ export function createRepositories(supabase) {
             return supabase.from('shift_inventory').upsert(payload, { onConflict: 'shift_id,product_id' });
         },
 
+        async getShiftStoreChecks(context, shiftId) {
+            const query = applyScope(
+                supabase
+                    .from('shift_store_checks')
+                    .select(selectColumns('shift_store_checks', LEGACY_SHIFT_STORE_CHECK_COLUMNS))
+                    .eq('shift_id', shiftId),
+                'shift_store_checks',
+                context,
+                { restaurant: false }
+            );
+
+            const result = await query;
+            if (result.error && isMissingRelationError(result.error, 'shift_store_checks')) {
+                return { data: [], error: null };
+            }
+            return result;
+        },
+
+        upsertShiftStoreChecks(context, rows) {
+            const payload = rows.map((row) => attachBranchPayload(
+                'shift_store_checks',
+                context,
+                sanitizeShiftStoreCheckPayload(ensureRowId(row))
+            ));
+            return supabase.from('shift_store_checks').upsert(payload, { onConflict: 'shift_id,material_id' });
+        },
+
         async getRawMaterials(context) {
-            const richerQuery = applyScope(
+            const withKeyFlags = await applyScope(
+                supabase
+                    .from('main_store')
+                    .select(selectColumns('main_store', 'id, restaurant_id, name, buy_unit, store_unit, conversion_factor, price, current_stock, stock_level, reorder_level, is_key_shift_item'))
+                    .order('name', { ascending: true }),
+                'main_store',
+                context
+            );
+            if (!withKeyFlags.error) {
+                return withKeyFlags;
+            }
+
+            if (
+                !isMissingColumnError(withKeyFlags.error, 'main_store', 'reorder_level') &&
+                !isMissingColumnError(withKeyFlags.error, 'main_store', 'is_key_shift_item')
+            ) {
+                return withKeyFlags;
+            }
+
+            const withReorderOnly = await applyScope(
                 supabase
                     .from('main_store')
                     .select(selectColumns('main_store', 'id, restaurant_id, name, buy_unit, store_unit, conversion_factor, price, current_stock, stock_level, reorder_level'))
@@ -745,10 +833,8 @@ export function createRepositories(supabase) {
                 'main_store',
                 context
             );
-
-            const richerResult = await richerQuery;
-            if (!richerResult.error || !isMissingColumnError(richerResult.error, 'main_store', 'reorder_level')) {
-                return richerResult;
+            if (!withReorderOnly.error || !isMissingColumnError(withReorderOnly.error, 'main_store', 'reorder_level')) {
+                return withReorderOnly;
             }
 
             return applyScope(
@@ -801,7 +887,8 @@ export function createRepositories(supabase) {
                     store_unit: payload.storeUnit,
                     conversion_factor: payload.conversionFactor,
                     price: payload.price,
-                    reorder_level: payload.reorderLevel
+                    reorder_level: payload.reorderLevel,
+                    is_key_shift_item: payload.isKeyShiftItem
                 }),
                 attachBranchPayload('main_store', context, {
                     restaurant_id: context.restaurantId,
@@ -822,6 +909,7 @@ export function createRepositories(supabase) {
             };
 
             return runMutationAttempts(mutate, attempts, [
+                { tableName: 'main_store', columnName: 'is_key_shift_item' },
                 { tableName: 'main_store', columnName: 'reorder_level' }
             ]);
         },
@@ -845,6 +933,7 @@ export function createRepositories(supabase) {
                     conversion_factor: payload.conversionFactor,
                     price: payload.price,
                     reorder_level: payload.reorderLevel,
+                    is_key_shift_item: payload.isKeyShiftItem,
                     stock_level: toNumber(payload.stockLevel),
                     current_stock: toNumber(payload.currentStock)
                 },
