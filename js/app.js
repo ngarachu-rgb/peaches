@@ -1447,6 +1447,21 @@ function getVarianceDisplayStyle(value) {
     return 'color:#1f2937; font-weight:700;';
 }
 
+function renderAuditReportSummary(summary = []) {
+    if (!summary.length) return '';
+
+    return `
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:12px; margin-bottom:14px;">
+            ${summary.map((item) => `
+                <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:12px 14px;">
+                    <div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:6px;">${item.label}</div>
+                    <div style="font-size:16px; font-weight:700; ${item.style || 'color:#1f2937;'}">${item.value}</div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
 function renderAuditReportPreview(report) {
     const preview = document.getElementById('auditReportPreview');
     if (!preview) return;
@@ -1461,9 +1476,11 @@ function renderAuditReportPreview(report) {
             ${report.notes.map((note) => `<div>${note}</div>`).join('')}
         </div>`
         : '';
+    const summaryMarkup = renderAuditReportSummary(report.summary || []);
 
       preview.innerHTML = `
           <div style="font-weight:700; color:#2c3e50; margin-bottom:10px;">${report.title}</div>
+          ${summaryMarkup}
           ${noteMarkup}
           <table style="width:100%; border-collapse:collapse;">
               <thead>
@@ -6024,9 +6041,22 @@ function buildRawItemsReceivedReport(data) {
         ])
     );
     const showBranch = isAllBranchesReportScope();
+    const totalReceivedCost = data.stockReceipts.reduce((sum, row) => (
+        sum + toNumber(row.total_received_cost ?? (toNumber(row.qty_received) * toNumber(row.buy_unit_price)))
+    ), 0);
+    const totalBuyQty = data.stockReceipts.reduce((sum, row) => sum + toNumber(row.qty_received), 0);
+    const totalStoreQty = data.stockReceipts.reduce((sum, row) => (
+        sum + toNumber(row.qty_posted_store ?? (toNumber(row.qty_received) * Math.max(toNumber(row.conversion_factor), 1)))
+    ), 0);
 
     return {
         title: 'Raw Items Received',
+        summary: [
+            { label: 'Receipt Rows', value: String(data.stockReceipts.length) },
+            { label: 'Total Received Cost', value: `KES ${formatMoney(totalReceivedCost)}` },
+            { label: 'Total Buy Qty', value: formatQuantity(totalBuyQty, 4) },
+            { label: 'Total Store Qty', value: formatQuantity(totalStoreQty, 4) }
+        ],
         columns: [
             { key: 'date', label: 'Date' },
             ...(showBranch ? [{ key: 'branch', label: 'Branch' }] : []),
@@ -6057,9 +6087,18 @@ function buildRawItemsReceivedReport(data) {
 
 function buildOperatingSuppliesReport(data) {
     const showBranch = isAllBranchesReportScope();
+    const totalSupplyCost = (data.supplyReceipts || []).reduce((sum, row) => sum + toNumber(row.total_received_cost), 0);
+    const totalSupplyQty = (data.supplyReceipts || []).reduce((sum, row) => sum + toNumber(row.qty_received), 0);
+    const categoryCount = new Set((data.supplyReceipts || []).map((row) => String(row.category || 'General Supplies').trim().toLowerCase())).size;
 
     return {
         title: 'Operating Supplies Received',
+        summary: [
+            { label: 'Supply Receipts', value: String((data.supplyReceipts || []).length) },
+            { label: 'Total Supply Cost', value: `KES ${formatMoney(totalSupplyCost)}` },
+            { label: 'Total Qty Received', value: formatQuantity(totalSupplyQty, 4) },
+            { label: 'Categories', value: String(categoryCount) }
+        ],
         columns: [
             { key: 'date', label: 'Date' },
             ...(showBranch ? [{ key: 'branch', label: 'Branch' }] : []),
@@ -6117,6 +6156,11 @@ function buildOutOfStockReport(data) {
 
     return {
         title: 'Out of Stock Items',
+        summary: [
+            { label: 'Out Of Stock Items', value: String(rows.length) },
+            { label: 'Negative Stock Items', value: String(rows.filter((row) => row.status === 'Negative Stock').length) },
+            { label: 'Zero Stock Items', value: String(rows.filter((row) => row.status === 'Out of Stock').length) }
+        ],
         columns: [
             ...(showBranch ? [{ key: 'branch', label: 'Branch' }] : []),
             { key: 'item', label: 'Item' },
@@ -6138,8 +6182,15 @@ function buildOutOfStockReport(data) {
 
 function buildTransferHistoryReport(data) {
     const showBranch = isAllBranchesReportScope();
+    const totalTransferredQty = (data.stockTransfers || []).reduce((sum, row) => sum + toNumber(row.qty), 0);
+    const routeCount = new Set((data.stockTransfers || []).map((row) => `${row.from_branch_id || ''}::${row.to_branch_id || ''}`)).size;
     return {
         title: 'Transfer History',
+        summary: [
+            { label: 'Transfer Rows', value: String((data.stockTransfers || []).length) },
+            { label: 'Total Qty Transferred', value: formatQuantity(totalTransferredQty, 4) },
+            { label: 'Branch Routes', value: String(routeCount) }
+        ],
         columns: [
             { key: 'date_time', label: 'Date / Time' },
             ...(showBranch ? [{ key: 'source_scope', label: 'Branch Scope' }] : []),
@@ -6171,8 +6222,15 @@ function buildTransferHistoryReport(data) {
 
 function buildExpensesSummaryReport(data) {
     const showBranch = isAllBranchesReportScope();
+    const totalExpenses = data.shifts.reduce((sum, shift) => sum + toNumber(shift.total_expenses), 0);
+    const shiftCount = data.shifts.length;
     return {
         title: 'Expenses Summary',
+        summary: [
+            { label: 'Closed Shifts', value: String(shiftCount) },
+            { label: 'Total Expenses', value: `KES ${formatMoney(totalExpenses)}` },
+            { label: 'Average Per Shift', value: `KES ${formatMoney(shiftCount ? totalExpenses / shiftCount : 0)}` }
+        ],
         columns: [
             { key: 'date', label: 'Date' },
             ...(showBranch ? [{ key: 'branch', label: 'Branch' }] : []),
@@ -6195,8 +6253,16 @@ function buildExpensesSummaryReport(data) {
 
 function buildDebtsSummaryReport(data) {
     const showBranch = isAllBranchesReportScope();
+    const totalDebtGiven = data.shifts.reduce((sum, shift) => sum + toNumber(shift.total_debts), 0);
+    const totalDebtPaid = data.shifts.reduce((sum, shift) => sum + toNumber(shift.debts_collected), 0);
+    const netDebtMovement = totalDebtGiven - totalDebtPaid;
     return {
         title: 'Debt Totals by Shift',
+        summary: [
+            { label: 'Debt Given', value: `KES ${formatMoney(totalDebtGiven)}` },
+            { label: 'Debt Paid', value: `KES ${formatMoney(totalDebtPaid)}` },
+            { label: 'Net Debt Movement', value: `KES ${formatMoney(netDebtMovement)}`, style: getVarianceDisplayStyle(-netDebtMovement) }
+        ],
         columns: [
             { key: 'date', label: 'Date' },
             ...(showBranch ? [{ key: 'branch', label: 'Branch' }] : []),
@@ -6223,9 +6289,16 @@ function buildDebtsSummaryReport(data) {
 function buildDebtTransactionsReport(data) {
     const shiftMap = new Map(data.shifts.map((shift) => [String(shift.id), shift]));
     const showBranch = isAllBranchesReportScope();
+    const totalGiven = data.debts.reduce((sum, row) => sum + (row.transaction_type === 'paid' ? 0 : toNumber(row.amount)), 0);
+    const totalPaid = data.debts.reduce((sum, row) => sum + (row.transaction_type === 'paid' ? toNumber(row.amount) : 0), 0);
 
     return {
         title: 'Debt Transactions',
+        summary: [
+            { label: 'Transaction Rows', value: String(data.debts.length) },
+            { label: 'Total Given', value: `KES ${formatMoney(totalGiven)}` },
+            { label: 'Total Paid', value: `KES ${formatMoney(totalPaid)}` }
+        ],
         columns: [
             { key: 'date_time', label: 'Date / Time' },
             ...(showBranch ? [{ key: 'branch', label: 'Branch' }] : []),
@@ -6282,8 +6355,19 @@ function buildDebtSummaryByClientReport(data) {
         grouped.set(key, existing);
     });
 
+    const groupedValues = [...grouped.values()].sort((left, right) => right.outstanding_balance - left.outstanding_balance);
+    const totalDebtGiven = groupedValues.reduce((sum, row) => sum + row.debt_given, 0);
+    const totalDebtPaid = groupedValues.reduce((sum, row) => sum + row.debt_paid, 0);
+    const outstandingBalance = groupedValues.reduce((sum, row) => sum + row.outstanding_balance, 0);
+
     return {
         title: 'Debt Summary by Client',
+        summary: [
+            { label: 'Clients', value: String(groupedValues.length) },
+            { label: 'Debt Given', value: `KES ${formatMoney(totalDebtGiven)}` },
+            { label: 'Debt Paid', value: `KES ${formatMoney(totalDebtPaid)}` },
+            { label: 'Outstanding Balance', value: `KES ${formatMoney(outstandingBalance)}`, style: getVarianceDisplayStyle(-outstandingBalance) }
+        ],
         columns: [
             { key: 'client_name', label: 'Client Name' },
             { key: 'phone', label: 'Phone' },
@@ -6291,8 +6375,7 @@ function buildDebtSummaryByClientReport(data) {
             { key: 'debt_paid', label: 'Debt Paid' },
             { key: 'outstanding_balance', label: 'Outstanding Balance' }
         ],
-        rows: [...grouped.values()]
-            .sort((left, right) => right.outstanding_balance - left.outstanding_balance)
+        rows: groupedValues
             .map((row) => ({
                 client_name: row.client_name,
                 phone: row.phone,
@@ -6328,16 +6411,25 @@ function buildSalesByItemReport(data) {
         grouped.set(key, existing);
     });
 
+    const groupedValues = [...grouped.values()].sort((left, right) => right.sales_total - left.sales_total);
+    const totalQtySold = groupedValues.reduce((sum, row) => sum + row.qty_sold, 0);
+    const totalSales = groupedValues.reduce((sum, row) => sum + row.sales_total, 0);
+    const topItem = groupedValues[0];
     return {
         title: 'Sales by Item',
+        summary: [
+            { label: 'Items Sold', value: String(groupedValues.length) },
+            { label: 'Total Qty Sold', value: formatQuantity(totalQtySold, 4) },
+            { label: 'Total Sales', value: `KES ${formatMoney(totalSales)}` },
+            { label: 'Top Item', value: topItem ? topItem.item : '--' }
+        ],
         columns: [
             { key: 'item', label: 'Item' },
             { key: 'qty_sold', label: 'Qty Sold' },
             { key: 'unit_price', label: 'Unit Price' },
             { key: 'sales_total', label: 'Sales Total' }
         ],
-        rows: [...grouped.values()]
-            .sort((left, right) => right.sales_total - left.sales_total)
+        rows: groupedValues
             .map((row) => ({
                 ...row,
                 unit_price: row.unit_price.toLocaleString(),
@@ -6376,6 +6468,12 @@ function buildSalesSummaryReport(data) {
 
     return {
         title: 'Sales Summary',
+        summary: [
+            { label: 'Closed Shifts', value: String(data.shifts.length) },
+            { label: 'Total Sales', value: `KES ${formatMoney(totals.totalSales)}` },
+            { label: 'Total Expenses', value: `KES ${formatMoney(totals.expenses)}` },
+            { label: 'Net Variance', value: `KES ${formatMoney(totals.variance)}`, style: getVarianceDisplayStyle(totals.variance) }
+        ],
         columns: [
             { key: 'date', label: 'Date' },
             ...(showBranch ? [{ key: 'branch', label: 'Branch' }] : []),
@@ -6391,6 +6489,25 @@ function buildSalesSummaryReport(data) {
 
 function buildVarianceDetailReport(data) {
     const showBranch = isAllBranchesReportScope();
+    const shiftVarianceValues = data.shifts.map((shift) => {
+        const mpesaOpening = toNumber(shift.mpesa_float);
+        const mpesaClosing = toNumber(shift.mpesa_closing);
+        const mpesaWithdrawals = toNumber(shift.mpesa_withdrawals);
+        const mpesaIncome = calculateMpesaIncome(mpesaOpening, mpesaClosing, mpesaWithdrawals);
+        const cashAtHand = toNumber(shift.cash_at_hand);
+        const expenses = toNumber(shift.total_expenses);
+        const debtGiven = toNumber(shift.total_debts);
+        const debtPaid = toNumber(shift.debts_collected);
+        const accountedIncome = calculateAccountedIncome({
+            cashAtHand,
+            mpesaIncome,
+            totalExpenses: expenses,
+            debtGiven,
+            prevDebtsPaid: debtPaid
+        });
+        const totalSales = toNumber(shift.total_sales);
+        return calculateVariance(totalSales, accountedIncome);
+    });
     const rows = data.shifts.map((shift) => {
         const mpesaOpening = toNumber(shift.mpesa_float);
         const mpesaClosing = toNumber(shift.mpesa_closing);
@@ -6495,6 +6612,12 @@ function buildVarianceDetailReport(data) {
 
     return {
         title: 'Variance Detail',
+        summary: [
+            { label: 'Shortage Shifts', value: String(shiftVarianceValues.filter((value) => value < 0).length) },
+            { label: 'Overage Shifts', value: String(shiftVarianceValues.filter((value) => value > 0).length) },
+            { label: 'Accounted Income', value: `KES ${formatMoney(totals.accountedIncome)}` },
+            { label: 'Net Variance', value: `KES ${formatMoney(totals.variance)}`, style: getVarianceDisplayStyle(totals.variance) }
+        ],
         columns: [
             { key: 'date', label: 'Date' },
             ...(showBranch ? [{ key: 'branch', label: 'Branch' }] : []),
@@ -6515,7 +6638,7 @@ function buildVarianceDetailReport(data) {
         rows,
         notes: [
             'This report shows the full reconciliation breakdown used to arrive at variance for each closed shift.',
-            'Variance is calculated as Total Sales minus Accounted Income.'
+            'Variance is calculated as Accounted Income minus Total Sales.'
         ]
     };
 }
@@ -6561,6 +6684,10 @@ function buildRawConsumptionReport(data) {
 
     return {
         title: 'Raw Consumption Estimate',
+        summary: [
+            { label: 'Raw Items Involved', value: String(grouped.size) },
+            { label: 'Estimated Raw Cost', value: `KES ${formatMoney([...grouped.values()].reduce((sum, row) => sum + row.estimated_cost, 0))}` }
+        ],
         columns: [
             { key: 'material_name', label: 'Material' },
             { key: 'store_unit', label: 'Store Unit' },
@@ -6606,6 +6733,12 @@ function buildKitchenVsSalesReport(data) {
 
     return {
         title: 'Kitchen vs Sales Comparison',
+        summary: [
+            { label: 'Items Compared', value: String(grouped.size) },
+            { label: 'Kitchen Output', value: formatQuantity([...grouped.values()].reduce((sum, row) => sum + row.kitchen_out, 0), 4) },
+            { label: 'Sold Qty', value: formatQuantity([...grouped.values()].reduce((sum, row) => sum + row.sold_qty, 0), 4) },
+            { label: 'Net Variance', value: formatQuantity([...grouped.values()].reduce((sum, row) => sum + row.variance, 0), 4) }
+        ],
         columns: [
             { key: 'item', label: 'Item' },
             { key: 'kitchen_out', label: 'Kitchen Out' },
@@ -6637,6 +6770,12 @@ function buildProfitLossReport(data) {
 
     return {
         title: 'Estimated Profit / Loss',
+        summary: [
+            { label: 'Total Sales', value: `KES ${formatMoney(totalSales)}` },
+            { label: 'Estimated Raw Cost', value: `KES ${formatMoney(rawCost)}` },
+            { label: 'Operating Expenses', value: `KES ${formatMoney(expenses)}` },
+            { label: 'Net Profit / Loss', value: `KES ${formatMoney(netProfit)}`, style: getVarianceDisplayStyle(netProfit) }
+        ],
         columns: [
             { key: 'metric', label: 'Metric' },
             { key: 'value', label: 'Value' }
