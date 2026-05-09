@@ -3013,6 +3013,68 @@ function renderShiftRecallTable(rows, options = {}) {
     `;
 }
 
+function buildShiftKeyStoreRecallRows(rows = []) {
+    return (rows || [])
+        .map((row) => ({
+            item: getDisplayMaterialName(row.material_name_snapshot || 'Unknown Item'),
+            unit: row.store_unit_snapshot || '--',
+            opening: toNumber(row.opening_qty),
+            expected: row.expected_qty === null || row.expected_qty === undefined ? null : toNumber(row.expected_qty),
+            actual: row.actual_closing_qty === null || row.actual_closing_qty === undefined ? null : toNumber(row.actual_closing_qty),
+            variance: row.variance_qty === null || row.variance_qty === undefined ? null : toNumber(row.variance_qty),
+            notes: String(row.notes || '').trim()
+        }))
+        .sort((left, right) => left.item.localeCompare(right.item));
+}
+
+function renderShiftKeyStoreRecallTable(rows) {
+    if (!rows.length) {
+        return '';
+    }
+
+    return `
+        <div style="margin-top:24px;">
+            <div style="margin-bottom:12px; font-size:12px; color:#64748b; text-transform:uppercase; letter-spacing:0.04em; font-weight:700;">Key Store Balance Check</div>
+            <div style="overflow-x:auto;">
+                <table class="shift-recall-table" style="width:100%; border-collapse:collapse; background:white; border:1px solid #e2e8f0; border-radius:10px; overflow:hidden;">
+                    <thead>
+                        <tr>
+                            <th style="padding:10px 12px; text-align:left;">Item</th>
+                            <th style="padding:10px 12px; text-align:left;">Unit</th>
+                            <th style="padding:10px 12px; text-align:right;">Open</th>
+                            <th style="padding:10px 12px; text-align:right;">Expected</th>
+                            <th style="padding:10px 12px; text-align:right;">Actual</th>
+                            <th style="padding:10px 12px; text-align:right;">Var</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map((row) => `
+                            <tr style="border-bottom:1px solid #e5e7eb;">
+                                <td style="padding:8px 12px; font-size:12px; font-weight:600;">${row.item}</td>
+                                <td style="padding:8px 12px; font-size:12px;">${row.unit}</td>
+                                <td style="padding:8px 12px; font-size:12px; text-align:right;">${formatQuantity(row.opening, 4)}</td>
+                                <td style="padding:8px 12px; font-size:12px; text-align:right;">${row.expected === null ? '--' : formatQuantity(row.expected, 4)}</td>
+                                <td style="padding:8px 12px; font-size:12px; text-align:right;">${row.actual === null ? '--' : formatQuantity(row.actual, 4)}</td>
+                                <td style="padding:8px 12px; font-size:12px; text-align:right; font-weight:700; ${row.variance === null ? 'color:#64748b;' : getVarianceDisplayStyle(row.variance)}">${row.variance === null ? '--' : formatQuantity(row.variance, 4)}</td>
+                            </tr>
+                            ${row.notes ? `
+                                <tr style="border-bottom:1px solid #e5e7eb; background:#f8fafc;">
+                                    <td colspan="6" style="padding:8px 12px; font-size:11px; color:#64748b;">
+                                        <strong style="color:#475569;">Notes:</strong> ${escapeHtml(row.notes)}
+                                    </td>
+                                </tr>
+                            ` : ''}
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+            <div style="margin-top:8px; font-size:12px; color:#64748b;">
+                This section compares saved expected store balances against the actual counted closing balances for the selected shift.
+            </div>
+        </div>
+    `;
+}
+
 function getTransferDestinationBranches() {
     const currentBranchId = state.branchId || state.user?.branch_id || state.user?.default_branch_id || '';
     return (state.branches || []).filter((branch) =>
@@ -6139,16 +6201,18 @@ window.viewShiftDetail = async (shiftId) => {
         const windowEnd = new Date(shiftDate);
         windowEnd.setDate(windowEnd.getDate() + 7);
 
-        const [shiftInventoryResult, nearbyShiftsResult, barIssuesResult] = await Promise.all([
+        const [shiftInventoryResult, nearbyShiftsResult, barIssuesResult, keyStoreChecksResult] = await Promise.all([
             repositories.getShiftInventory(shiftScope, shiftId),
             repositories.getShiftReportsByRange(shiftScope, toDateOnly(windowStart), toDateOnly(windowEnd)),
             isDirectSalesBranch(shift.branch_id)
                 ? repositories.getBarStockIssues(shiftScope)
-                : Promise.resolve({ data: [], error: null })
+                : Promise.resolve({ data: [], error: null }),
+            repositories.getShiftStoreChecks(shiftScope, shiftId)
         ]);
         if (shiftInventoryResult.error) throw shiftInventoryResult.error;
         if (nearbyShiftsResult.error) throw nearbyShiftsResult.error;
         if (barIssuesResult.error) throw barIssuesResult.error;
+        if (keyStoreChecksResult.error) throw keyStoreChecksResult.error;
 
         const sameBranchShifts = annotateShiftsForDisplay(
             (nearbyShiftsResult.data || []).filter((row) => String(row.branch_id || '') === String(shift.branch_id || '')),
@@ -6175,6 +6239,7 @@ window.viewShiftDetail = async (shiftId) => {
             nextInventoryRows,
             barIssueRows: (barIssuesResult.data || []).filter((row) => String(row.shift_id || '') === String(shift.id))
         });
+        const keyStoreRecallRows = buildShiftKeyStoreRecallRows(keyStoreChecksResult.data || []);
 
         detailContent.innerHTML = `
             <div style="background:white; padding:20px; border-radius:8px; border:1px solid #e2e8f0; box-shadow:0 2px 4px rgba(0,0,0,0.05);">
@@ -6190,6 +6255,7 @@ window.viewShiftDetail = async (shiftId) => {
                 ${buildShiftRecallSummaryCards(shift, shiftLabel)}
                 <div style="margin-bottom:12px; font-size:12px; color:#64748b; text-transform:uppercase; letter-spacing:0.04em; font-weight:700;">Item Detail</div>
                 ${renderShiftRecallTable(recallRows, { savedTotalSales: shift.total_sales })}
+                ${renderShiftKeyStoreRecallTable(keyStoreRecallRows)}
                 <div style="margin-top:12px; font-size:12px; color:#64748b;">
                     Use this view to inspect opening, added, closing, sold, price, and total for each item in the selected shift.
                 </div>
