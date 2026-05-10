@@ -2936,52 +2936,36 @@ function buildShiftRecallSummaryCards(shift, shiftLabel) {
         : '';
 
     return `
-        <div style="display:grid; gap:18px; margin-bottom:20px;">
-            <div style="display:flex; justify-content:space-between; gap:18px; flex-wrap:wrap; align-items:flex-start;">
-                <div style="display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;">
-                    <div style="font-size:34px; font-weight:800; color:#0f172a; letter-spacing:0.02em;">SHIFT REPORT</div>
-                    <div style="font-size:14px; color:#64748b;">Ref: ${shift.id.slice(0, 8)}</div>
-                </div>
-                <div style="display:grid; grid-template-columns:repeat(2, minmax(180px, 1fr)); gap:8px 24px; min-width:min(100%, 420px);">
-                    <div style="font-size:13px; color:#64748b;">Branch</div><div style="font-size:14px; font-weight:700; color:#0f172a;">${branchName}</div>
-                    <div style="font-size:13px; color:#64748b;">Business Date</div><div style="font-size:14px; font-weight:700; color:#0f172a;">${businessDate}</div>
-                    <div style="font-size:13px; color:#64748b;">Closed By</div><div style="font-size:14px; font-weight:700; color:#0f172a;">${escapeHtml(shift.closed_by || 'Staff')}</div>
-                    <div style="font-size:13px; color:#64748b;">Shift</div><div style="font-size:18px; font-weight:800; color:#1d4ed8;">${escapeHtml(shiftLabel || '--')}</div>
-                </div>
-            </div>
-            <div style="display:grid; grid-template-columns:180px 1fr; gap:12px; align-items:center; border-top:1px solid #0f172a; padding-top:10px;">
-                <div style="font-size:13px; color:#64748b;">Recorded At</div>
-                <div style="font-size:14px; font-weight:700; color:#0f172a;">${recordedAt}</div>
-            </div>
-            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:18px;">
+        <div style="display:grid; gap:10px; margin-bottom:12px;">
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px;">
                 <table style="width:100%; margin:0; border-collapse:collapse; border:1px solid #0f172a;">
                     <tbody>
-                        <tr><td style="padding:9px 12px; border:1px solid #0f172a; width:44%; font-size:13px; color:#475569;">Total Sales</td><td style="padding:9px 12px; border:1px solid #0f172a; font-size:16px; font-weight:800; color:#0f172a;">KES ${formatMoney(shift.total_sales)}</td></tr>
-                        <tr><td style="padding:9px 12px; border:1px solid #0f172a; font-size:13px; color:#475569;">Variance</td><td style="padding:9px 12px; border:1px solid #0f172a; font-size:16px; font-weight:800; ${getVarianceDisplayStyle(variance)}">KES ${formatMoney(variance)}</td></tr>
+                        <tr><td style="padding:6px 9px; border:1px solid #0f172a; width:44%; font-size:12px; color:#475569;">Total Sales</td><td style="padding:6px 9px; border:1px solid #0f172a; font-size:14px; font-weight:800; color:#0f172a;">KES ${formatMoney(shift.total_sales)}</td></tr>
+                        <tr><td style="padding:6px 9px; border:1px solid #0f172a; font-size:12px; color:#475569;">Variance</td><td style="padding:6px 9px; border:1px solid #0f172a; font-size:14px; font-weight:800; ${getVarianceDisplayStyle(variance)}">KES ${formatMoney(variance)}</td></tr>
                     </tbody>
                 </table>
                 <table style="width:100%; margin:0; border-collapse:collapse; border:1px solid #0f172a;">
                     <tbody>
-                        <tr><td style="padding:9px 12px; border:1px solid #0f172a; width:62%; font-size:13px; color:#475569;">M-Pesa Opening</td><td style="padding:9px 12px; border:1px solid #0f172a; font-size:15px; font-weight:700; color:#0f172a;">KES ${formatMoney(shift.mpesa_float)}</td></tr>
-                        <tr><td style="padding:9px 12px; border:1px solid #0f172a; font-size:13px; color:#475569;">M-Pesa Closing</td><td style="padding:9px 12px; border:1px solid #0f172a; font-size:15px; font-weight:700; color:#0f172a;">KES ${formatMoney(shift.mpesa_closing)}</td></tr>
-                        <tr><td style="padding:9px 12px; border:1px solid #0f172a; font-size:13px; color:#475569;">M-Pesa Withdrawal</td><td style="padding:9px 12px; border:1px solid #0f172a; font-size:15px; font-weight:700; color:#0f172a;">KES ${formatMoney(shift.mpesa_withdrawals)}</td></tr>
-                        <tr><td style="padding:9px 12px; border:1px solid #0f172a; font-size:13px; color:#475569;">M-Pesa Income</td><td style="padding:9px 12px; border:1px solid #0f172a; font-size:15px; font-weight:700; color:#0f172a;">KES ${formatMoney(mpesaIncome)}</td></tr>
+                        <tr><td style="padding:6px 9px; border:1px solid #0f172a; width:62%; font-size:12px; color:#475569;">M-Pesa Opening</td><td style="padding:6px 9px; border:1px solid #0f172a; font-size:13px; font-weight:700; color:#0f172a;">KES ${formatMoney(shift.mpesa_float)}</td></tr>
+                        <tr><td style="padding:6px 9px; border:1px solid #0f172a; font-size:12px; color:#475569;">M-Pesa Closing</td><td style="padding:6px 9px; border:1px solid #0f172a; font-size:13px; font-weight:700; color:#0f172a;">KES ${formatMoney(shift.mpesa_closing)}</td></tr>
+                        <tr><td style="padding:6px 9px; border:1px solid #0f172a; font-size:12px; color:#475569;">M-Pesa Withdrawal</td><td style="padding:6px 9px; border:1px solid #0f172a; font-size:13px; font-weight:700; color:#0f172a;">KES ${formatMoney(shift.mpesa_withdrawals)}</td></tr>
+                        <tr><td style="padding:6px 9px; border:1px solid #0f172a; font-size:12px; color:#475569;">M-Pesa Income</td><td style="padding:6px 9px; border:1px solid #0f172a; font-size:13px; font-weight:700; color:#0f172a;">KES ${formatMoney(mpesaIncome)}</td></tr>
                     </tbody>
                 </table>
                 <table style="width:100%; margin:0; border-collapse:collapse; border:1px solid #0f172a;">
                     <tbody>
-                        <tr><td style="padding:9px 12px; border:1px solid #0f172a; width:54%; font-size:13px; color:#475569;">Cash at Hand</td><td style="padding:9px 12px; border:1px solid #0f172a; font-size:15px; font-weight:700; color:#0f172a;">KES ${formatMoney(shift.cash_at_hand)}</td></tr>
-                        <tr><td style="padding:9px 12px; border:1px solid #0f172a; font-size:13px; color:#475569;">Expenses</td><td style="padding:9px 12px; border:1px solid #0f172a; font-size:15px; font-weight:700; color:#0f172a;">KES ${formatMoney(shift.total_expenses)}</td></tr>
-                        <tr><td style="padding:9px 12px; border:1px solid #0f172a; font-size:13px; color:#475569;">Debt Given</td><td style="padding:9px 12px; border:1px solid #0f172a; font-size:15px; font-weight:700; color:#0f172a;">KES ${formatMoney(shift.total_debts)}</td></tr>
-                        <tr><td style="padding:9px 12px; border:1px solid #0f172a; font-size:13px; color:#475569;">Debt Paid</td><td style="padding:9px 12px; border:1px solid #0f172a; font-size:15px; font-weight:700; color:#0f172a;">KES ${formatMoney(shift.debts_collected)}</td></tr>
+                        <tr><td style="padding:6px 9px; border:1px solid #0f172a; width:54%; font-size:12px; color:#475569;">Cash at Hand</td><td style="padding:6px 9px; border:1px solid #0f172a; font-size:13px; font-weight:700; color:#0f172a;">KES ${formatMoney(shift.cash_at_hand)}</td></tr>
+                        <tr><td style="padding:6px 9px; border:1px solid #0f172a; font-size:12px; color:#475569;">Expenses</td><td style="padding:6px 9px; border:1px solid #0f172a; font-size:13px; font-weight:700; color:#0f172a;">KES ${formatMoney(shift.total_expenses)}</td></tr>
+                        <tr><td style="padding:6px 9px; border:1px solid #0f172a; font-size:12px; color:#475569;">Debt Given</td><td style="padding:6px 9px; border:1px solid #0f172a; font-size:13px; font-weight:700; color:#0f172a;">KES ${formatMoney(shift.total_debts)}</td></tr>
+                        <tr><td style="padding:6px 9px; border:1px solid #0f172a; font-size:12px; color:#475569;">Debt Paid</td><td style="padding:6px 9px; border:1px solid #0f172a; font-size:13px; font-weight:700; color:#0f172a;">KES ${formatMoney(shift.debts_collected)}</td></tr>
                     </tbody>
                 </table>
             </div>
-            <div style="display:grid; grid-template-columns:repeat(3, minmax(160px, 1fr)); gap:18px; align-items:end;">
+            <div style="display:grid; grid-template-columns:repeat(3, minmax(160px, 1fr)); gap:12px; align-items:end;">
                 ${teamMembers.map((name, index) => `
                     <div style="display:grid; grid-template-columns:auto 1fr; gap:8px; align-items:end;">
-                        <div style="font-size:13px; color:#0f172a; white-space:nowrap;">Team Member ${index + 1}</div>
-                        <div style="min-height:24px; border-bottom:1px solid #0f172a; font-size:14px; font-weight:600; color:#0f172a; padding:0 4px 2px 4px;">${escapeHtml(name || '')}</div>
+                        <div style="font-size:12px; color:#0f172a; white-space:nowrap;">Team Member ${index + 1}</div>
+                        <div style="min-height:18px; border-bottom:1px solid #0f172a; font-size:12px; font-weight:600; color:#0f172a; padding:0 2px 1px 2px;">${escapeHtml(name || '')}</div>
                     </div>
                 `).join('')}
             </div>
@@ -6354,21 +6338,26 @@ window.viewShiftDetail = async (shiftId) => {
         const keyStoreRecallRows = buildShiftKeyStoreRecallRows(keyStoreChecksResult.data || []);
 
         detailContent.innerHTML = `
-            <div style="background:white; padding:20px; border-radius:8px; border:1px solid #e2e8f0; box-shadow:0 2px 4px rgba(0,0,0,0.05);">
-                <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:20px; border-bottom:1px solid #eee; padding-bottom:12px;">
-                    <div>
-                        <h3 style="margin:0 0 4px 0;">Shift Recall</h3>
-                        <div style="color:#64748b; font-size:12px;">Ref: ${shift.id.slice(0, 8)} | ${formatShiftRecallDate(shift.shift_date || shift.created_at)}</div>
-                    </div>
-                    <div style="display:inline-flex; align-items:center; gap:8px; background:#eff6ff; color:#1d4ed8; border-radius:999px; padding:8px 12px; font-weight:700;">
-                        ${shiftLabel}
-                    </div>
+            <div style="background:white; padding:10px 12px; border-radius:8px; border:1px solid #e2e8f0; box-shadow:0 2px 4px rgba(0,0,0,0.05);">
+                <div style="display:grid; grid-template-columns:minmax(150px, 1.2fr) minmax(110px, 0.8fr) minmax(120px, 0.9fr) minmax(130px, 1fr) minmax(90px, 0.7fr) minmax(140px, 1fr); gap:5px 14px; align-items:end; margin-bottom:8px; border-bottom:1px solid #e5e7eb; padding-bottom:6px;">
+                    <div style="font-size:14px; font-weight:800; color:#0f172a;">Shift Recall</div>
+                    <div style="font-size:11px; color:#64748b;">Ref: ${shift.id.slice(0, 8)}</div>
+                    <div style="font-size:11px; color:#64748b;">Business Date</div>
+                    <div style="font-size:14px; font-weight:700; color:#0f172a;">${formatShiftRecallDate(shift.shift_date || shift.created_at)}</div>
+                    <div style="font-size:11px; color:#64748b;">Shift</div>
+                    <div style="font-size:14px; font-weight:800; color:#1d4ed8;">${escapeHtml(shiftLabel || '--')}</div>
+                    <div style="font-size:11px; color:#64748b;">Recorded At</div>
+                    <div style="font-size:12px; font-weight:700; color:#0f172a; white-space:nowrap;">${formatShiftRecallDateTime(shift.created_at)}</div>
+                    <div style="font-size:11px; color:#64748b;">Branch</div>
+                    <div style="font-size:14px; font-weight:700; color:#0f172a;">${escapeHtml(getBranchName(shift.branch_id) || '--')}</div>
+                    <div style="font-size:11px; color:#64748b;">Closed By</div>
+                    <div style="font-size:14px; font-weight:700; color:#0f172a;">${escapeHtml(shift.closed_by || 'Staff')}</div>
                 </div>
                 ${buildShiftRecallSummaryCards(shift, shiftLabel)}
-                <div style="margin-bottom:12px; font-size:12px; color:#64748b; text-transform:uppercase; letter-spacing:0.04em; font-weight:700;">Item Detail</div>
+                <div style="margin-bottom:8px; font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:0.04em; font-weight:700;">Item Detail</div>
                 ${renderShiftRecallTable(recallRows, { savedTotalSales: shift.total_sales })}
                 ${renderShiftKeyStoreRecallTable(keyStoreRecallRows)}
-                <div style="margin-top:12px; font-size:12px; color:#64748b;">
+                <div style="margin-top:8px; font-size:11px; color:#64748b;">
                     Use this view to inspect opening, added, closing, sold, price, and total for each item in the selected shift.
                 </div>
             </div>
