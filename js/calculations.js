@@ -115,6 +115,13 @@ export function getNextShiftSeed(previousShift, configuredShiftSystem = DEFAULT_
 export function annotateShiftsForDisplay(shifts = [], configuredShiftSystem = DEFAULT_SHIFT_SYSTEM) {
     const shiftSystem = normalizeShiftSystem(configuredShiftSystem);
     const dateCounters = new Map();
+    const getShiftTypeRank = (shiftType) => {
+        const normalized = String(shiftType || '').trim().toUpperCase();
+        if (normalized === 'NIGHT') return 2;
+        if (normalized === 'DAY') return 1;
+        if (normalized === 'FULL') return 1;
+        return 0;
+    };
 
     const chronological = [...(shifts || [])].sort(
         (left, right) => new Date(left.created_at || 0).getTime() - new Date(right.created_at || 0).getTime()
@@ -140,7 +147,16 @@ export function annotateShiftsForDisplay(shifts = [], configuredShiftSystem = DE
     });
 
     return annotated.sort(
-        (left, right) => new Date(right.created_at || 0).getTime() - new Date(left.created_at || 0).getTime()
+        (left, right) => {
+            const dateDiff = new Date(`${right.shift_date || toDateOnly(right.created_at || new Date())}T00:00:00Z`).getTime()
+                - new Date(`${left.shift_date || toDateOnly(left.created_at || new Date())}T00:00:00Z`).getTime();
+            if (dateDiff !== 0) return dateDiff;
+
+            const shiftTypeDiff = getShiftTypeRank(right.shift_type || right.shiftLabel) - getShiftTypeRank(left.shift_type || left.shiftLabel);
+            if (shiftTypeDiff !== 0) return shiftTypeDiff;
+
+            return new Date(right.created_at || 0).getTime() - new Date(left.created_at || 0).getTime();
+        }
     );
 }
 

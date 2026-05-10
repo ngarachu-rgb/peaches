@@ -1447,6 +1447,41 @@ export function createRepositories(supabase) {
             );
         },
 
+        async getExpensesByRange(context, startDate, endDate) {
+            const effectiveEndDate = endDate || startDate;
+            const richQuery = applyScope(
+                supabase
+                    .from('expenses')
+                    .select(selectColumns('expenses', 'id, restaurant_id, shift_id, amount, description, qty, unit_cost, notes, created_by, created_at'))
+                    .filter('created_at', 'gte', `${startDate}T00:00:00Z`)
+                    .filter('created_at', 'lte', `${effectiveEndDate}T23:59:59Z`)
+                    .order('created_at', { ascending: false }),
+                'expenses',
+                context
+            );
+
+            const richResult = await richQuery;
+            if (!richResult.error || !(
+                isMissingColumnError(richResult.error, 'expenses', 'qty') ||
+                isMissingColumnError(richResult.error, 'expenses', 'unit_cost') ||
+                isMissingColumnError(richResult.error, 'expenses', 'notes') ||
+                isMissingColumnError(richResult.error, 'expenses', 'created_by')
+            )) {
+                return richResult;
+            }
+
+            return applyScope(
+                supabase
+                    .from('expenses')
+                    .select(selectColumns('expenses', 'id, restaurant_id, shift_id, amount, description, created_at'))
+                    .filter('created_at', 'gte', `${startDate}T00:00:00Z`)
+                    .filter('created_at', 'lte', `${effectiveEndDate}T23:59:59Z`)
+                    .order('created_at', { ascending: false }),
+                'expenses',
+                context
+            );
+        },
+
         insertExpense(context, payload) {
             const attempts = [
                 attachBranchPayload('expenses', context, {

@@ -34,6 +34,7 @@ const appModalState = {
 };
 
 const NAV_BUTTONS = {
+    summaryPage: 'navSummary',
     salesPage: 'navSales',
     kitchenPage: 'navKitchen',
     finishedProductsPage: 'navProducts',
@@ -47,6 +48,9 @@ const NAV_BUTTONS = {
 };
 const INVENTORY_PAGE_IDS = ['finishedProductsPage', 'storePage', 'matrixPage'];
 let inventoryNavExpanded = false;
+const summaryDashboardState = {
+    period: 'month'
+};
 const OPERATION_MANUAL_SECTIONS = [
     {
         title: 'Logging In And Choosing A Branch',
@@ -856,14 +860,14 @@ function autoResizeTextarea(textarea) {
 function setRawImportStatus(message, isError = false) {
     const status = document.getElementById('rawImportStatus');
     if (!status) return;
-    status.innerText = message;
+    status.innerText = `${branchName} - closed shifts only`;
     status.style.color = isError ? '#dc2626' : '#64748b';
 }
 
 function setAuditReportStatus(message, isError = false) {
     const status = document.getElementById('auditReportStatus');
     if (!status) return;
-    status.innerText = message;
+    status.innerText = `${branchName} - closed shifts only`;
     status.style.color = isError ? '#dc2626' : '#64748b';
 }
 
@@ -1050,6 +1054,419 @@ function isAllBranchesReportScope() {
     return canSwitchBranches(state.role)
         && (document.getElementById('reportScope')?.value || 'current') === 'all';
 }
+
+function getSummaryDashboardPeriodRange(period = summaryDashboardState.period) {
+    const today = new Date();
+    const endDate = toDateOnly(today);
+
+    if (period === 'week') {
+        const start = new Date(today);
+        const day = start.getDay();
+        const diff = day === 0 ? -6 : 1 - day;
+        start.setDate(start.getDate() + diff);
+        return {
+            period,
+            startDate: toDateOnly(start),
+            endDate,
+            label: `This Week - ${formatLongDate(`${toDateOnly(start)}T00:00:00`)} to ${formatLongDate(`${endDate}T00:00:00`)}`
+        };
+    }
+
+    if (period === 'year') {
+        const year = today.getFullYear();
+        return {
+            period,
+            startDate: `${year}-01-01`,
+            endDate: `${year}-12-31`,
+            label: `This Year - ${year}`
+        };
+    }
+
+    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+    return {
+        period: 'month',
+        startDate: toDateOnly(monthStart),
+        endDate,
+        label: `This Month - ${today.toLocaleString(undefined, { month: 'long', year: 'numeric' })}`
+    };
+}
+
+async function loadSummaryDashboardDataForRange(startDate, endDate) {
+    const scope = getScope();
+    const [
+        shiftsResult,
+        receiptsResult,
+        supplyReceiptsResult,
+        expensesResult,
+        productsResult
+    ] = await Promise.all([
+        repositories.getShiftReportsByRange(scope, startDate, endDate),
+        repositories.getStockReceiptsByRange(scope, startDate, endDate),
+        repositories.getSupplyReceiptsByRange(scope, startDate, endDate),
+        repositories.getExpensesByRange(scope, startDate, endDate),
+        repositories.getProducts(scope, { includeInactive: true })
+    ]);
+
+    if (shiftsResult.error) throw shiftsResult.error;
+    if (receiptsResult.error) throw receiptsResult.error;
+    if (supplyReceiptsResult.error) throw supplyReceiptsResult.error;
+    if (expensesResult.error) throw expensesResult.error;
+    if (productsResult.error) throw productsResult.error;
+
+    const shifts = annotateShiftsForDisplay(
+        (shiftsResult.data || []).filter((shift) => shift.total_sales !== null),
+        state.shiftSystem
+    );
+
+    const shiftInventoryResult = await repositories.getShiftInventoryForShiftIds(
+        scope,
+        shifts.map((shift) => shift.id)
+    );
+    if (shiftInventoryResult.error) throw shiftInventoryResult.error;
+
+    return {
+        shifts,
+        stockReceipts: receiptsResult.data || [],
+        supplyReceipts: supplyReceiptsResult.data || [],
+        expenses: expensesResult.data || [],
+        products: productsResult.data || [],
+        shiftInventory: shiftInventoryResult.data || []
+    };
+}
+
+function groupAndRank(entries, keyBuilder, valueBuilder, qtyBuilder = null) {
+    const grouped = new Map();
+
+    (entries || []).forEach((entry) => {
+        const key = keyBuilder(entry);
+        if (!key) return;
+        const current = grouped.get(key) || { key, value: 0, qty: 0, rows: [] };
+        current.value += toNumber(valueBuilder(entry));
+        if (qtyBuilder) current.qty += toNumber(qtyBuilder(entry));
+        current.rows.push(entry);
+        grouped.set(key, current);
+    });
+
+    return [...grouped.values()].sort((left, right) => right.value - left.value);
+}
+
+function getShiftCashierName(shift) {
+    const teamCashier = String(shift?.team_member_1 || '').trim();
+    if (teamCashier) {
+        return teamCashier;
+    }
+
+    return String(shift?.closed_by || '').trim() || 'Unassigned';
+}
+
+function getSummaryDashboardMetrics(data) {
+    const salesTotal = (data.shifts || []).reduce((sum, shift) => sum + toNumber(shift.total_sales), 0);
+    const stockPurchaseTotal = (data.stockReceipts || []).reduce((sum, row) => sum + toNumber(row.total_received_cost), 0);
+    const supplyPurchaseTotal = (data.supplyReceipts || []).reduce((sum, row) => sum + toNumber(row.total_received_cost), 0);
+    const expenseTotal = (data.expenses || []).reduce((sum, row) => sum + toNumber(row.amount), 0);
+    const totalExpenditure = stockPurchaseTotal + supplyPurchaseTotal + expenseTotal;
+    const netPosition = salesTotal - totalExpenditure;
+
+    const productMap = new Map((data.products || []).map((product) => [String(product.id), product]));
+    const topSellingItems = groupAndRank(
+        data.shiftInventory || [],
+        (row) => String(row.product_id || ''),
+        (row) => {
+            const lineTotal = toNumber(row.line_total);
+            const unitPrice = toNumber(row.unit_price);
+            return lineTotal > 0 ? lineTotal : toNumber(row.sold_qty) * unitPrice;
+        },
+        (row) => toNumber(row.sold_qty)
+    ).slice(0, 4).map((entry) => {
+        const product = productMap.get(entry.key);
+        return {
+            label: getDisplayProductName(product?.name || `Unknown (${entry.key.slice(0, 8)})`),
+            qty: entry.qty,
+            value: entry.value
+        };
+    });
+
+    const topPurchases = [
+        ...groupAndRank(
+            data.stockReceipts || [],
+            (row) => `stock::${String(row.material_name || '').trim().toLowerCase()}`,
+            (row) => toNumber(row.total_received_cost),
+            (row) => toNumber(row.qty_received)
+        ).map((entry) => ({
+            label: getDisplayMaterialName(entry.rows[0]?.material_name || ''),
+            source: 'Stock',
+            qty: entry.qty,
+            value: entry.value,
+            unit: entry.rows[0]?.buy_unit || ''
+        })),
+        ...groupAndRank(
+            data.supplyReceipts || [],
+            (row) => `supply::${String(row.item_name || '').trim().toLowerCase()}`,
+            (row) => toNumber(row.total_received_cost),
+            (row) => toNumber(row.qty_received)
+        ).map((entry) => ({
+            label: getDisplaySupplyItemName(entry.rows[0]?.item_name || ''),
+            source: 'Supply',
+            qty: entry.qty,
+            value: entry.value,
+            unit: entry.rows[0]?.buy_unit || ''
+        }))
+    ].sort((left, right) => right.value - left.value).slice(0, 4);
+
+    const topExpenditures = groupAndRank(
+        data.expenses || [],
+        (row) => String(row.description || 'Uncategorised').trim().toLowerCase(),
+        (row) => toNumber(row.amount)
+    ).slice(0, 4).map((entry) => ({
+        label: entry.rows[0]?.description || 'Uncategorised',
+        value: entry.value,
+        count: entry.rows.length
+    }));
+
+    const topShiftSales = [...(data.shifts || [])]
+        .sort((left, right) => toNumber(right.total_sales) - toNumber(left.total_sales))
+        .slice(0, 5)
+        .map((shift) => ({
+            date: formatDateDisplay(shift.shift_date || shift.created_at),
+            shift: shift.shiftLabel || shift.shift_type || '--',
+            staff: getShiftCashierName(shift),
+            value: toNumber(shift.total_sales)
+        }));
+
+    const cashierRanks = groupAndRank(
+        data.shifts || [],
+        (shift) => getShiftCashierName(shift).toLowerCase(),
+        (shift) => toNumber(shift.total_sales)
+    ).map((entry) => ({
+        name: getShiftCashierName(entry.rows[0]),
+        totalSales: entry.value,
+        shifts: entry.rows.length,
+        averageSales: entry.rows.length ? entry.value / entry.rows.length : 0
+    }));
+
+    return {
+        salesTotal,
+        totalExpenditure,
+        netPosition,
+        stockPurchaseTotal,
+        supplyPurchaseTotal,
+        expenseTotal,
+        topSellingItems,
+        topPurchases,
+        topExpenditures,
+        topShiftSales,
+        highestCashier: cashierRanks[0] || null
+    };
+}
+
+function getAnnualSummaryChartData(data, year) {
+    const monthLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const months = monthLabels.map((label, index) => ({ label, monthIndex: index, sales: 0, expenditure: 0 }));
+
+    (data.shifts || []).forEach((shift) => {
+        const sourceDate = shift.shift_date || shift.created_at;
+        const date = new Date(sourceDate);
+        if (date.getFullYear() !== year) return;
+        months[date.getMonth()].sales += toNumber(shift.total_sales);
+    });
+
+    const addExpenseToMonth = (dateValue, amount) => {
+        const date = new Date(dateValue);
+        if (date.getFullYear() !== year) return;
+        months[date.getMonth()].expenditure += toNumber(amount);
+    };
+
+    (data.stockReceipts || []).forEach((row) => addExpenseToMonth(row.created_at, row.total_received_cost));
+    (data.supplyReceipts || []).forEach((row) => addExpenseToMonth(row.created_at, row.total_received_cost));
+    (data.expenses || []).forEach((row) => addExpenseToMonth(row.created_at, row.amount));
+
+    return months;
+}
+
+function renderSummaryMetricCard(label, value, hint = '', valueStyle = '') {
+    return `
+        <div style="background:#ffffff; border:1px solid #dbe4ee; border-radius:12px; padding:12px; box-shadow:0 4px 12px rgba(15,23,42,0.05);">
+            <div style="font-size:10px; color:#64748b; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:4px; font-weight:800;">${label}</div>
+            <div style="font-size:22px; font-weight:800; color:#0f172a; line-height:1.1; ${valueStyle}">${value}</div>
+            ${hint ? `<div style="font-size:11px; color:#64748b; margin-top:4px; line-height:1.2;">${hint}</div>` : ''}
+        </div>
+    `;
+}
+
+function renderSummaryListPanel(title, rows, renderRow, emptyText) {
+    return `
+        <div style="background:#ffffff; border:1px solid #dbe4ee; border-radius:12px; padding:12px; box-shadow:0 4px 12px rgba(15,23,42,0.05);">
+            <div style="font-size:10px; color:#64748b; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:8px; font-weight:800;">${title}</div>
+            ${(rows || []).length ? `
+                <div style="display:grid; gap:7px;">
+                    ${(rows || []).map(renderRow).join('')}
+                </div>
+            ` : `<div style="font-size:12px; color:#94a3b8;">${emptyText}</div>`}
+        </div>
+    `;
+}
+
+function renderAnnualSummaryChart(months, year) {
+    const maxValue = Math.max(1, ...months.flatMap((month) => [month.sales, month.expenditure]));
+    return `
+        <div style="background:#ffffff; border:1px solid #dbe4ee; border-radius:12px; padding:12px; box-shadow:0 4px 12px rgba(15,23,42,0.05);">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
+                <div>
+                    <div style="font-size:10px; color:#64748b; text-transform:uppercase; letter-spacing:0.06em; font-weight:800;">Annual Trend</div>
+                    <div style="font-size:16px; font-weight:800; color:#0f172a;">Sales vs Spend - ${year}</div>
+                </div>
+                <div style="display:flex; gap:12px; flex-wrap:wrap; font-size:11px; color:#475569;">
+                    <span style="display:inline-flex; align-items:center; gap:6px;"><span style="width:12px; height:12px; border-radius:3px; background:#1d4ed8;"></span>Sales</span>
+                    <span style="display:inline-flex; align-items:center; gap:6px;"><span style="width:12px; height:12px; border-radius:3px; background:#ea580c;"></span>Spend</span>
+                </div>
+            </div>
+            <div style="font-size:10px; font-weight:700; color:#64748b; margin-bottom:6px;">Amounts in KES</div>
+            <div style="display:grid; grid-template-columns:repeat(12, minmax(40px, 1fr)); gap:8px; align-items:end; min-height:220px;">
+                ${months.map((month) => `
+                    <div style="display:grid; gap:5px; align-items:end;">
+                        <div style="display:flex; align-items:flex-end; justify-content:center; gap:4px; min-height:176px;">
+                            <div title="Sales: Kshs ${formatMoney(month.sales)}" style="width:12px; height:${Math.max(4, (month.sales / maxValue) * 166)}px; background:#1d4ed8; border-radius:5px 5px 0 0;"></div>
+                            <div title="Spend: Kshs ${formatMoney(month.expenditure)}" style="width:12px; height:${Math.max(4, (month.expenditure / maxValue) * 166)}px; background:#ea580c; border-radius:5px 5px 0 0;"></div>
+                        </div>
+                        <div style="font-size:9px; color:#64748b; text-align:center; line-height:1.15;">Kshs ${formatMoney(Math.max(month.sales, month.expenditure))}</div>
+                        <div style="font-size:11px; color:#475569; text-align:center; font-weight:700;">${month.label}</div>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `;
+}
+
+function renderSummaryDashboard(data, annualData, periodMeta) {
+    const metrics = getSummaryDashboardMetrics(data);
+    const currentYear = new Date().getFullYear();
+    const annualMonths = getAnnualSummaryChartData(annualData, currentYear);
+    const branchName = getCurrentBranchName();
+    const periodBadge = document.getElementById('summaryPeriodBadge');
+    const status = document.getElementById('summaryDashboardStatus');
+    const content = document.getElementById('summaryDashboardContent');
+
+    if (periodBadge) {
+        periodBadge.innerText = `${periodMeta.label.replace('Â·', '-')} - ${branchName}`;
+    }
+    if (status) {
+        status.innerText = `${branchName} - closed shifts only`;
+    }
+    if (!content) return;
+
+    const highestCashier = metrics.highestCashier
+        ? `${escapeHtml(metrics.highestCashier.name)} - KES ${formatMoney(metrics.highestCashier.totalSales)}`
+        : 'No cashier data';
+
+    content.innerHTML = `
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px; margin-bottom:14px;">
+            ${renderSummaryMetricCard('Sales', `KES ${formatMoney(metrics.salesTotal)}`, `${data.shifts.length} shifts`)}
+            ${renderSummaryMetricCard('Spend', `KES ${formatMoney(metrics.totalExpenditure)}`, `Purchases KES ${formatMoney(metrics.stockPurchaseTotal + metrics.supplyPurchaseTotal)} - Expenses KES ${formatMoney(metrics.expenseTotal)}`)}
+            ${renderSummaryMetricCard('Net', `KES ${formatMoney(metrics.netPosition)}`, '', metrics.netPosition < 0 ? 'color:#b91c1c;' : 'color:#166534;')}
+            ${renderSummaryMetricCard('Best Cashier', highestCashier, metrics.highestCashier ? `${metrics.highestCashier.shifts} shifts - Avg KES ${formatMoney(metrics.highestCashier.averageSales)}` : 'No closed shifts', 'font-size:16px; line-height:1.3;')}
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:12px; margin-bottom:14px;">
+            ${renderSummaryListPanel(
+                'Top Sellers',
+                metrics.topSellingItems,
+                (row, index) => `
+                    <div style="display:grid; grid-template-columns:auto 1fr auto; gap:8px; align-items:center;">
+                        <div style="font-size:11px; font-weight:800; color:#64748b;">${index + 1}</div>
+                        <div>
+                            <div style="font-size:12px; font-weight:700; color:#0f172a;">${escapeHtml(row.label)}</div>
+                            <div style="font-size:11px; color:#64748b;">Qty ${formatQuantity(row.qty, 2)}</div>
+                        </div>
+                        <div style="font-size:12px; font-weight:800; color:#0f172a;">KES ${formatMoney(row.value)}</div>
+                    </div>`,
+                'No sales in this period.'
+            )}
+            ${renderSummaryListPanel(
+                'Top Buys',
+                metrics.topPurchases,
+                (row, index) => `
+                    <div style="display:grid; grid-template-columns:auto 1fr auto; gap:8px; align-items:center;">
+                        <div style="font-size:12px; font-weight:800; color:#64748b;">${index + 1}</div>
+                        <div>
+                            <div style="font-size:12px; font-weight:700; color:#0f172a;">${escapeHtml(row.label)}</div>
+                            <div style="font-size:11px; color:#64748b;">${row.source} - ${formatQuantity(row.qty, 2)} ${escapeHtml(row.unit || '')}</div>
+                        </div>
+                        <div style="font-size:12px; font-weight:800; color:#0f172a;">KES ${formatMoney(row.value)}</div>
+                    </div>`,
+                'No purchases in this period.'
+            )}
+            ${renderSummaryListPanel(
+                'Top Expenses',
+                metrics.topExpenditures,
+                (row, index) => `
+                    <div style="display:grid; grid-template-columns:auto 1fr auto; gap:8px; align-items:center;">
+                        <div style="font-size:12px; font-weight:800; color:#64748b;">${index + 1}</div>
+                        <div>
+                            <div style="font-size:12px; font-weight:700; color:#0f172a;">${escapeHtml(row.label)}</div>
+                            <div style="font-size:11px; color:#64748b;">${row.count} entries</div>
+                        </div>
+                        <div style="font-size:12px; font-weight:800; color:#0f172a;">KES ${formatMoney(row.value)}</div>
+                    </div>`,
+                'No expenses in this period.'
+            )}
+            ${renderSummaryListPanel(
+                'Best Shifts',
+                metrics.topShiftSales,
+                (row, index) => `
+                    <div style="display:grid; grid-template-columns:auto 1fr auto; gap:8px; align-items:center;">
+                        <div style="font-size:12px; font-weight:800; color:#64748b;">${index + 1}</div>
+                        <div>
+                            <div style="font-size:12px; font-weight:700; color:#0f172a;">${escapeHtml(row.date)} - ${escapeHtml(row.shift)}</div>
+                            <div style="font-size:11px; color:#64748b;">${escapeHtml(row.staff)}</div>
+                        </div>
+                        <div style="font-size:12px; font-weight:800; color:#0f172a;">KES ${formatMoney(row.value)}</div>
+                    </div>`,
+                'No closed shifts.'
+            )}
+        </div>
+        ${renderAnnualSummaryChart(annualMonths, currentYear)}
+    `;
+}
+
+async function loadSummaryDashboard() {
+    const content = document.getElementById('summaryDashboardContent');
+    const status = document.getElementById('summaryDashboardStatus');
+    const periodMeta = getSummaryDashboardPeriodRange(summaryDashboardState.period);
+    const year = new Date().getFullYear();
+    const yearStart = `${year}-01-01`;
+    const yearEnd = `${year}-12-31`;
+
+    document.getElementById('summaryPeriodWeekBtn')?.setAttribute('style', summaryDashboardState.period === 'week' ? 'background:#7092ae; color:white;' : 'background:#edf2f7; color:#2d3748;');
+    document.getElementById('summaryPeriodMonthBtn')?.setAttribute('style', summaryDashboardState.period === 'month' ? 'background:#7092ae; color:white;' : 'background:#edf2f7; color:#2d3748;');
+    document.getElementById('summaryPeriodYearBtn')?.setAttribute('style', summaryDashboardState.period === 'year' ? 'background:#7092ae; color:white;' : 'background:#edf2f7; color:#2d3748;');
+
+    if (status) status.innerText = 'Loading summary...';
+    if (content) content.innerHTML = '';
+
+    const [periodData, annualData] = await Promise.all([
+        loadSummaryDashboardDataForRange(periodMeta.startDate, periodMeta.endDate),
+        loadSummaryDashboardDataForRange(yearStart, yearEnd)
+    ]);
+
+    renderSummaryDashboard(periodData, annualData, periodMeta);
+}
+
+window.setSummaryDashboardPeriod = async (period) => {
+    if (!['week', 'month', 'year'].includes(period)) {
+        return;
+    }
+
+    summaryDashboardState.period = period;
+
+    if (getActivePageId() !== 'summaryPage') {
+        return;
+    }
+
+    try {
+        await loadSummaryDashboard();
+    } catch (error) {
+        handleError(error, 'Failed to load summary dashboard');
+    }
+};
 
 function applyRoleAccess() {
     Object.entries(NAV_BUTTONS).forEach(([pageId, buttonId]) => {
@@ -2324,7 +2741,7 @@ function renderKeyStoreChecks() {
     if (!isRestaurantKeyStoreCheckEnabled()) {
         section.classList.add('hidden');
         body.innerHTML = '';
-        status.innerText = '';
+        status.innerText = `${branchName} - closed shifts only`;
         return;
     }
 
@@ -2332,12 +2749,12 @@ function renderKeyStoreChecks() {
     if (!rows.length) {
         section.classList.add('hidden');
         body.innerHTML = '';
-        status.innerText = '';
+        status.innerText = `${branchName} - closed shifts only`;
         return;
     }
 
     section.classList.remove('hidden');
-    status.innerText = 'Actual balances are mandatory for all key items before the shift can be closed.';
+    status.innerText = `${branchName} - closed shifts only`;
     body.innerHTML = rows.map((row) => `
         <tr style="border-bottom:1px solid #e2e8f0;">
             <td style="padding:7px 10px; font-size:12px; font-weight:600;">${getDisplayMaterialName(row.materialName)}</td>
@@ -2468,7 +2885,7 @@ function renderKitchenBatchInputs() {
     container.innerHTML = `
         <div style="display:grid; gap:10px;">
             ${state.kitchenDrafts.map((draft, index) => `
-                <div style="display:grid; grid-template-columns:minmax(0, 2fr) minmax(120px, 180px) auto; gap:10px; align-items:center;">
+                <div style="display:grid; grid-template-columns:minmax(0, 2fr) minmax(120px, 180px) auto; gap:8px; align-items:center;">
                     <input
                         type="text"
                         id="kitchenProduct${index}"
@@ -2946,18 +3363,18 @@ function buildShiftRecallSummaryCards(shift, shiftLabel) {
                 </table>
                 <table style="width:100%; margin:0; border-collapse:collapse; border:1px solid #0f172a;">
                     <tbody>
-                        <tr><td style="padding:6px 9px; border:1px solid #0f172a; width:62%; font-size:12px; color:#475569;">M-Pesa Opening</td><td style="padding:6px 9px; border:1px solid #0f172a; font-size:13px; font-weight:700; color:#0f172a;">KES ${formatMoney(shift.mpesa_float)}</td></tr>
-                        <tr><td style="padding:6px 9px; border:1px solid #0f172a; font-size:12px; color:#475569;">M-Pesa Closing</td><td style="padding:6px 9px; border:1px solid #0f172a; font-size:13px; font-weight:700; color:#0f172a;">KES ${formatMoney(shift.mpesa_closing)}</td></tr>
-                        <tr><td style="padding:6px 9px; border:1px solid #0f172a; font-size:12px; color:#475569;">M-Pesa Withdrawal</td><td style="padding:6px 9px; border:1px solid #0f172a; font-size:13px; font-weight:700; color:#0f172a;">KES ${formatMoney(shift.mpesa_withdrawals)}</td></tr>
-                        <tr><td style="padding:6px 9px; border:1px solid #0f172a; font-size:12px; color:#475569;">M-Pesa Income</td><td style="padding:6px 9px; border:1px solid #0f172a; font-size:13px; font-weight:700; color:#0f172a;">KES ${formatMoney(mpesaIncome)}</td></tr>
+                        <tr><td style="padding:6px 9px; border:1px solid #0f172a; width:62%; font-size:12px; color:#475569;">M-Pesa Opening</td><td style="padding:6px 9px; border:1px solid #0f172a; font-size:12px; font-weight:700; color:#0f172a;">KES ${formatMoney(shift.mpesa_float)}</td></tr>
+                        <tr><td style="padding:6px 9px; border:1px solid #0f172a; font-size:12px; color:#475569;">M-Pesa Closing</td><td style="padding:6px 9px; border:1px solid #0f172a; font-size:12px; font-weight:700; color:#0f172a;">KES ${formatMoney(shift.mpesa_closing)}</td></tr>
+                        <tr><td style="padding:6px 9px; border:1px solid #0f172a; font-size:12px; color:#475569;">M-Pesa Withdrawal</td><td style="padding:6px 9px; border:1px solid #0f172a; font-size:12px; font-weight:700; color:#0f172a;">KES ${formatMoney(shift.mpesa_withdrawals)}</td></tr>
+                        <tr><td style="padding:6px 9px; border:1px solid #0f172a; font-size:12px; color:#475569;">M-Pesa Income</td><td style="padding:6px 9px; border:1px solid #0f172a; font-size:12px; font-weight:700; color:#0f172a;">KES ${formatMoney(mpesaIncome)}</td></tr>
                     </tbody>
                 </table>
                 <table style="width:100%; margin:0; border-collapse:collapse; border:1px solid #0f172a;">
                     <tbody>
-                        <tr><td style="padding:6px 9px; border:1px solid #0f172a; width:54%; font-size:12px; color:#475569;">Cash at Hand</td><td style="padding:6px 9px; border:1px solid #0f172a; font-size:13px; font-weight:700; color:#0f172a;">KES ${formatMoney(shift.cash_at_hand)}</td></tr>
-                        <tr><td style="padding:6px 9px; border:1px solid #0f172a; font-size:12px; color:#475569;">Expenses</td><td style="padding:6px 9px; border:1px solid #0f172a; font-size:13px; font-weight:700; color:#0f172a;">KES ${formatMoney(shift.total_expenses)}</td></tr>
-                        <tr><td style="padding:6px 9px; border:1px solid #0f172a; font-size:12px; color:#475569;">Debt Given</td><td style="padding:6px 9px; border:1px solid #0f172a; font-size:13px; font-weight:700; color:#0f172a;">KES ${formatMoney(shift.total_debts)}</td></tr>
-                        <tr><td style="padding:6px 9px; border:1px solid #0f172a; font-size:12px; color:#475569;">Debt Paid</td><td style="padding:6px 9px; border:1px solid #0f172a; font-size:13px; font-weight:700; color:#0f172a;">KES ${formatMoney(shift.debts_collected)}</td></tr>
+                        <tr><td style="padding:6px 9px; border:1px solid #0f172a; width:54%; font-size:12px; color:#475569;">Cash at Hand</td><td style="padding:6px 9px; border:1px solid #0f172a; font-size:12px; font-weight:700; color:#0f172a;">KES ${formatMoney(shift.cash_at_hand)}</td></tr>
+                        <tr><td style="padding:6px 9px; border:1px solid #0f172a; font-size:12px; color:#475569;">Expenses</td><td style="padding:6px 9px; border:1px solid #0f172a; font-size:12px; font-weight:700; color:#0f172a;">KES ${formatMoney(shift.total_expenses)}</td></tr>
+                        <tr><td style="padding:6px 9px; border:1px solid #0f172a; font-size:12px; color:#475569;">Debt Given</td><td style="padding:6px 9px; border:1px solid #0f172a; font-size:12px; font-weight:700; color:#0f172a;">KES ${formatMoney(shift.total_debts)}</td></tr>
+                        <tr><td style="padding:6px 9px; border:1px solid #0f172a; font-size:12px; color:#475569;">Debt Paid</td><td style="padding:6px 9px; border:1px solid #0f172a; font-size:12px; font-weight:700; color:#0f172a;">KES ${formatMoney(shift.debts_collected)}</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -3093,7 +3510,7 @@ function renderShiftKeyStoreRecallTable(rows) {
 
     return `
         <div style="margin-top:24px;">
-            <div style="margin-bottom:12px; font-size:12px; color:#64748b; text-transform:uppercase; letter-spacing:0.04em; font-weight:700;">Key Store Balance Check</div>
+            <div style="margin-bottom:12px; font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:0.04em; font-weight:700;">Key Store Balance Check</div>
             <div style="overflow-x:auto;">
                 <table class="shift-recall-table" style="width:100%; border-collapse:collapse; background:white; border:1px solid #e2e8f0; border-radius:10px; overflow:hidden;">
                     <thead>
@@ -3127,7 +3544,7 @@ function renderShiftKeyStoreRecallTable(rows) {
                     </tbody>
                 </table>
             </div>
-            <div style="margin-top:8px; font-size:12px; color:#64748b;">
+            <div style="margin-top:8px; font-size:11px; color:#64748b;">
                 This section compares saved expected store balances against the actual counted closing balances for the selected shift.
             </div>
         </div>
@@ -5705,6 +6122,8 @@ window.showPage = async (id) => {
               }
               await loadInventory();
               await refreshCurrentShiftSummary();
+        } else if (id === 'summaryPage') {
+            await loadSummaryDashboard();
         } else if (id === 'kitchenPage') {
             await loadCurrentShift();
             await loadInventory();
@@ -7338,3 +7757,11 @@ window.updateItemField = (id, field, value) => {
 };
 
 document.getElementById('postBtn')?.addEventListener('click', window.processReverseDispatch);
+
+
+
+
+
+
+
+

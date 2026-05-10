@@ -19,3 +19,11 @@ select
 from public.main_store
 where coalesce(is_key_shift_item, false) = true;
 
+select
+    policyname,
+    cmd,
+    roles
+from pg_policies
+where schemaname = 'public'
+  and tablename = 'shift_store_checks'
+order by policyname;
