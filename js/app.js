@@ -29,7 +29,8 @@ const appModalState = {
     sourceElement: null,
     placeholder: null,
     dismissHandler: null,
-    mode: 'hosted'
+    mode: 'hosted',
+    sourceWasHidden: false
 };
 
 const NAV_BUTTONS = {
@@ -455,12 +456,16 @@ function hideAppModal() {
     appModalState.placeholder = null;
     appModalState.dismissHandler = null;
     appModalState.mode = 'hosted';
+    appModalState.sourceWasHidden = false;
 }
 
 function closeAppModalImmediate() {
     const { body } = getAppModalElements();
 
     if (appModalState.mode === 'hosted' && appModalState.sourceElement && appModalState.placeholder?.parentNode) {
+        if (appModalState.sourceWasHidden) {
+            appModalState.sourceElement.classList.add('hidden');
+        }
         appModalState.placeholder.parentNode.insertBefore(appModalState.sourceElement, appModalState.placeholder);
         appModalState.placeholder.remove();
     }
@@ -479,6 +484,8 @@ function openHostedModal(title, sourceId, dismissHandler = null) {
     const placeholder = document.createElement('div');
     placeholder.dataset.modalPlaceholderFor = sourceId;
     sourceElement.parentNode?.insertBefore(placeholder, sourceElement);
+    const sourceWasHidden = sourceElement.classList.contains('hidden');
+    sourceElement.classList.remove('hidden');
     body.appendChild(sourceElement);
 
     titleNode.innerText = title || 'Edit';
@@ -490,6 +497,7 @@ function openHostedModal(title, sourceId, dismissHandler = null) {
     appModalState.placeholder = placeholder;
     appModalState.dismissHandler = dismissHandler;
     appModalState.mode = 'hosted';
+    appModalState.sourceWasHidden = sourceWasHidden;
 
     const firstField = sourceElement.querySelector('input, select, textarea, button');
     if (firstField instanceof HTMLElement) {
@@ -562,6 +570,37 @@ function openPromptModal({
             });
         }
     });
+}
+
+function getShiftTeamMembers(shift = state.currentShift) {
+    if (!shift) return [];
+    return [
+        String(shift.team_member_1 || '').trim(),
+        String(shift.team_member_2 || '').trim(),
+        String(shift.team_member_3 || '').trim()
+    ].filter(Boolean);
+}
+
+function populateShiftTeamForm(shift = state.currentShift) {
+    document.getElementById('shiftTeamMember1').value = String(shift?.team_member_1 || '').trim();
+    document.getElementById('shiftTeamMember2').value = String(shift?.team_member_2 || '').trim();
+    document.getElementById('shiftTeamMember3').value = String(shift?.team_member_3 || '').trim();
+}
+
+function isShiftTeamModalOpen() {
+    return appModalState.sourceId === 'shiftTeamFormCard';
+}
+
+function openShiftTeamModal() {
+    populateShiftTeamForm();
+    openHostedModal('Shift Team Members', 'shiftTeamFormCard', () => {});
+}
+
+async function ensureShiftTeamMembers() {
+    if (!state.currentShift?.id) return;
+    if (getShiftTeamMembers(state.currentShift).length > 0) return;
+    if (isShiftTeamModalOpen()) return;
+    openShiftTeamModal();
 }
 
 function getDraftedClosingQty(productId, fallback = 0) {
@@ -1658,6 +1697,7 @@ function setLoading(button, isLoading, text = 'Processing...') {
 async function loadCurrentShift() {
     state.currentShift = await ensureActiveShift(getScope(), repositories);
     await refreshCurrentShiftSummary();
+    await ensureShiftTeamMembers();
     return state.currentShift;
 }
 
@@ -1673,7 +1713,7 @@ async function refreshCurrentShiftSummary() {
         return;
     }
 
-    const shiftDate = toDateOnly(state.currentShift.created_at || new Date());
+    const shiftDate = state.currentShift.shift_date || toDateOnly(state.currentShift.created_at || new Date());
     let shiftLabel = state.currentShift.shift_type || (state.shiftSystem === 1 ? 'FULL' : '');
 
     if (!shiftLabel) {
@@ -2877,20 +2917,13 @@ function buildShiftRecallSummaryCards(shift, shiftLabel) {
         prevDebtsPaid: shift.debts_collected
     });
     const variance = calculateVariance(shift.total_sales, accountedIncome);
-
-    const summaryItems = [
-        { label: 'Branch', value: getBranchName(shift.branch_id) || '--' },
-        { label: 'Business Date', value: formatShiftRecallDate(shift.created_at) },
-        { label: 'Shift', value: shiftLabel || '--' },
-        { label: 'Closed By', value: shift.closed_by || 'Staff' },
-        { label: 'Total Sales', value: `KES ${formatMoney(shift.total_sales)}` },
-        { label: 'M-Pesa Income', value: `KES ${formatMoney(mpesaIncome)}` },
-        { label: 'Cash at Hand', value: `KES ${formatMoney(shift.cash_at_hand)}` },
-        { label: 'Expenses', value: `KES ${formatMoney(shift.total_expenses)}` },
-        { label: 'Debt Given', value: `KES ${formatMoney(shift.total_debts)}` },
-        { label: 'Debt Paid', value: `KES ${formatMoney(shift.debts_collected)}` },
-        { label: 'Variance', value: `KES ${formatMoney(variance)}`, valueStyle: getVarianceDisplayStyle(variance) },
-        { label: 'Recorded At', value: formatShiftRecallDateTime(shift.created_at) }
+    const branchName = getBranchName(shift.branch_id) || '--';
+    const businessDate = formatShiftRecallDate(shift.shift_date || shift.created_at);
+    const recordedAt = formatShiftRecallDateTime(shift.created_at);
+    const teamMembers = [
+        String(shift.team_member_1 || '').trim(),
+        String(shift.team_member_2 || '').trim(),
+        String(shift.team_member_3 || '').trim()
     ];
 
     const notesMarkup = String(shift.reconciliation_notes || '').trim()
@@ -2903,13 +2936,55 @@ function buildShiftRecallSummaryCards(shift, shiftLabel) {
         : '';
 
     return `
-        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:12px; margin-bottom:20px;">
-            ${summaryItems.map((item) => `
-                <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:12px 14px;">
-                    <div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:6px;">${item.label}</div>
-                    <div style="font-size:15px; ${item.valueStyle || 'font-weight:700; color:#1f2937;'}">${item.value}</div>
+        <div style="display:grid; gap:18px; margin-bottom:20px;">
+            <div style="display:flex; justify-content:space-between; gap:18px; flex-wrap:wrap; align-items:flex-start;">
+                <div style="display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;">
+                    <div style="font-size:34px; font-weight:800; color:#0f172a; letter-spacing:0.02em;">SHIFT REPORT</div>
+                    <div style="font-size:14px; color:#64748b;">Ref: ${shift.id.slice(0, 8)}</div>
                 </div>
-            `).join('')}
+                <div style="display:grid; grid-template-columns:repeat(2, minmax(180px, 1fr)); gap:8px 24px; min-width:min(100%, 420px);">
+                    <div style="font-size:13px; color:#64748b;">Branch</div><div style="font-size:14px; font-weight:700; color:#0f172a;">${branchName}</div>
+                    <div style="font-size:13px; color:#64748b;">Business Date</div><div style="font-size:14px; font-weight:700; color:#0f172a;">${businessDate}</div>
+                    <div style="font-size:13px; color:#64748b;">Closed By</div><div style="font-size:14px; font-weight:700; color:#0f172a;">${escapeHtml(shift.closed_by || 'Staff')}</div>
+                    <div style="font-size:13px; color:#64748b;">Shift</div><div style="font-size:18px; font-weight:800; color:#1d4ed8;">${escapeHtml(shiftLabel || '--')}</div>
+                </div>
+            </div>
+            <div style="display:grid; grid-template-columns:180px 1fr; gap:12px; align-items:center; border-top:1px solid #0f172a; padding-top:10px;">
+                <div style="font-size:13px; color:#64748b;">Recorded At</div>
+                <div style="font-size:14px; font-weight:700; color:#0f172a;">${recordedAt}</div>
+            </div>
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:18px;">
+                <table style="width:100%; margin:0; border-collapse:collapse; border:1px solid #0f172a;">
+                    <tbody>
+                        <tr><td style="padding:9px 12px; border:1px solid #0f172a; width:44%; font-size:13px; color:#475569;">Total Sales</td><td style="padding:9px 12px; border:1px solid #0f172a; font-size:16px; font-weight:800; color:#0f172a;">KES ${formatMoney(shift.total_sales)}</td></tr>
+                        <tr><td style="padding:9px 12px; border:1px solid #0f172a; font-size:13px; color:#475569;">Variance</td><td style="padding:9px 12px; border:1px solid #0f172a; font-size:16px; font-weight:800; ${getVarianceDisplayStyle(variance)}">KES ${formatMoney(variance)}</td></tr>
+                    </tbody>
+                </table>
+                <table style="width:100%; margin:0; border-collapse:collapse; border:1px solid #0f172a;">
+                    <tbody>
+                        <tr><td style="padding:9px 12px; border:1px solid #0f172a; width:62%; font-size:13px; color:#475569;">M-Pesa Opening</td><td style="padding:9px 12px; border:1px solid #0f172a; font-size:15px; font-weight:700; color:#0f172a;">KES ${formatMoney(shift.mpesa_float)}</td></tr>
+                        <tr><td style="padding:9px 12px; border:1px solid #0f172a; font-size:13px; color:#475569;">M-Pesa Closing</td><td style="padding:9px 12px; border:1px solid #0f172a; font-size:15px; font-weight:700; color:#0f172a;">KES ${formatMoney(shift.mpesa_closing)}</td></tr>
+                        <tr><td style="padding:9px 12px; border:1px solid #0f172a; font-size:13px; color:#475569;">M-Pesa Withdrawal</td><td style="padding:9px 12px; border:1px solid #0f172a; font-size:15px; font-weight:700; color:#0f172a;">KES ${formatMoney(shift.mpesa_withdrawals)}</td></tr>
+                        <tr><td style="padding:9px 12px; border:1px solid #0f172a; font-size:13px; color:#475569;">M-Pesa Income</td><td style="padding:9px 12px; border:1px solid #0f172a; font-size:15px; font-weight:700; color:#0f172a;">KES ${formatMoney(mpesaIncome)}</td></tr>
+                    </tbody>
+                </table>
+                <table style="width:100%; margin:0; border-collapse:collapse; border:1px solid #0f172a;">
+                    <tbody>
+                        <tr><td style="padding:9px 12px; border:1px solid #0f172a; width:54%; font-size:13px; color:#475569;">Cash at Hand</td><td style="padding:9px 12px; border:1px solid #0f172a; font-size:15px; font-weight:700; color:#0f172a;">KES ${formatMoney(shift.cash_at_hand)}</td></tr>
+                        <tr><td style="padding:9px 12px; border:1px solid #0f172a; font-size:13px; color:#475569;">Expenses</td><td style="padding:9px 12px; border:1px solid #0f172a; font-size:15px; font-weight:700; color:#0f172a;">KES ${formatMoney(shift.total_expenses)}</td></tr>
+                        <tr><td style="padding:9px 12px; border:1px solid #0f172a; font-size:13px; color:#475569;">Debt Given</td><td style="padding:9px 12px; border:1px solid #0f172a; font-size:15px; font-weight:700; color:#0f172a;">KES ${formatMoney(shift.total_debts)}</td></tr>
+                        <tr><td style="padding:9px 12px; border:1px solid #0f172a; font-size:13px; color:#475569;">Debt Paid</td><td style="padding:9px 12px; border:1px solid #0f172a; font-size:15px; font-weight:700; color:#0f172a;">KES ${formatMoney(shift.debts_collected)}</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div style="display:grid; grid-template-columns:repeat(3, minmax(160px, 1fr)); gap:18px; align-items:end;">
+                ${teamMembers.map((name, index) => `
+                    <div style="display:grid; grid-template-columns:auto 1fr; gap:8px; align-items:end;">
+                        <div style="font-size:13px; color:#0f172a; white-space:nowrap;">Team Member ${index + 1}</div>
+                        <div style="min-height:24px; border-bottom:1px solid #0f172a; font-size:14px; font-weight:600; color:#0f172a; padding:0 4px 2px 4px;">${escapeHtml(name || '')}</div>
+                    </div>
+                `).join('')}
+            </div>
         </div>
         ${notesMarkup}
     `;
@@ -4084,12 +4159,49 @@ window.calcSalesRow = (element) => {
 };
 
 window.dismissAppModal = () => {
+    if (appModalState.sourceId === 'shiftTeamFormCard' && getShiftTeamMembers(state.currentShift).length === 0) {
+        return;
+    }
+
     if (typeof appModalState.dismissHandler === 'function') {
         appModalState.dismissHandler();
         return;
     }
 
     closeAppModalImmediate();
+};
+
+window.saveShiftTeamMembers = async () => {
+    try {
+        if (!state.currentShift?.id) {
+            throw new Error('No active shift was found.');
+        }
+
+        const teamMember1 = String(document.getElementById('shiftTeamMember1')?.value || '').trim();
+        const teamMember2 = String(document.getElementById('shiftTeamMember2')?.value || '').trim();
+        const teamMember3 = String(document.getElementById('shiftTeamMember3')?.value || '').trim();
+
+        if (![teamMember1, teamMember2, teamMember3].some(Boolean)) {
+            throw new Error('Enter at least one team member to continue.');
+        }
+
+        const result = await repositories.updateShift(state.currentShift.id, {
+            team_member_1: teamMember1 || null,
+            team_member_2: teamMember2 || null,
+            team_member_3: teamMember3 || null
+        });
+        if (result.error) throw result.error;
+
+        state.currentShift = {
+            ...state.currentShift,
+            ...result.data
+        };
+
+        closeAppModalImmediate();
+        showAppToast('Shift team saved.');
+    } catch (error) {
+        handleError(error, 'Failed to save shift team');
+    }
 };
 
 window.filterSales = () => {
@@ -6246,7 +6358,7 @@ window.viewShiftDetail = async (shiftId) => {
                 <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:20px; border-bottom:1px solid #eee; padding-bottom:12px;">
                     <div>
                         <h3 style="margin:0 0 4px 0;">Shift Recall</h3>
-                        <div style="color:#64748b; font-size:12px;">Ref: ${shift.id.slice(0, 8)} | ${formatShiftRecallDate(shift.created_at)}</div>
+                        <div style="color:#64748b; font-size:12px;">Ref: ${shift.id.slice(0, 8)} | ${formatShiftRecallDate(shift.shift_date || shift.created_at)}</div>
                     </div>
                     <div style="display:inline-flex; align-items:center; gap:8px; background:#eff6ff; color:#1d4ed8; border-radius:999px; padding:8px 12px; font-weight:700;">
                         ${shiftLabel}

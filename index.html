@@ -474,6 +474,28 @@
         <div id="appModalBody" style="padding:18px;"></div>
     </div>
 </div>
+<div id="shiftTeamFormCard" class="hidden" style="display:grid; gap:16px;">
+    <div style="background:#eff6ff; border:1px solid #bfdbfe; color:#1d4ed8; padding:12px 14px; border-radius:10px; font-size:13px;">
+        Enter at least one team member before continuing with this shift.
+    </div>
+    <div class="recon-grid" style="margin-top:0;">
+        <div>
+            <label for="shiftTeamMember1" style="font-size:12px; color:#64748b;">Team Member 1</label>
+            <input type="text" id="shiftTeamMember1" name="shiftTeamMember1" placeholder="e.g. Cashier / Supervisor">
+        </div>
+        <div>
+            <label for="shiftTeamMember2" style="font-size:12px; color:#64748b;">Team Member 2</label>
+            <input type="text" id="shiftTeamMember2" name="shiftTeamMember2" placeholder="Optional">
+        </div>
+        <div>
+            <label for="shiftTeamMember3" style="font-size:12px; color:#64748b;">Team Member 3</label>
+            <input type="text" id="shiftTeamMember3" name="shiftTeamMember3" placeholder="Optional">
+        </div>
+    </div>
+    <div style="display:flex; justify-content:flex-end;">
+        <button type="button" class="btn btn-success" onclick="saveShiftTeamMembers()">Save Team</button>
+    </div>
+</div>
 <div id="salesPage" class="page active">
     <div class="card">
         <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px;">
