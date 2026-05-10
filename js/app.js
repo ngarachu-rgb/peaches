@@ -24,6 +24,7 @@ let idleLogoutInterval = null;
 let idleMonitorBound = false;
 let idleLogoutInProgress = false;
 let lastUserActivityAt = 0;
+let backgroundCoreRefreshPromise = null;
 const appModalState = {
     sourceId: '',
     sourceElement: null,
@@ -48,9 +49,13 @@ const NAV_BUTTONS = {
 };
 const INVENTORY_PAGE_IDS = ['finishedProductsPage', 'storePage', 'matrixPage'];
 let inventoryNavExpanded = false;
+let currentStocksView = 'receipts';
 const summaryDashboardState = {
     period: 'month'
 };
+const summaryProductsCache = new Map();
+const summaryDashboardDataCache = new Map();
+const auditReferenceCache = new Map();
 const OPERATION_MANUAL_SECTIONS = [
     {
         title: 'Logging In And Choosing A Branch',
@@ -1055,6 +1060,39 @@ function isAllBranchesReportScope() {
         && (document.getElementById('reportScope')?.value || 'current') === 'all';
 }
 
+function getScopeCacheKey(scope = getScope()) {
+    return [
+        String(scope?.restaurantId || 'none'),
+        scope?.useBranchScope === false ? 'all' : String(scope?.branchId || 'none'),
+        String(scope?.shiftSystem || ''),
+        String(scope?.operatingMode || '')
+    ].join('::');
+}
+
+function clearReferenceDataCaches() {
+    summaryProductsCache.clear();
+    summaryDashboardDataCache.clear();
+    auditReferenceCache.clear();
+}
+
+function isCredentialRetryableError(error) {
+    const message = String(error?.message || '').trim().toLowerCase();
+    return message === 'invalid login credentials';
+}
+
+function normalizeLoginError(error) {
+    const message = String(error?.message || '').trim().toLowerCase();
+    if (
+        message.includes('failed to fetch')
+        || message.includes('err_name_not_resolved')
+        || message.includes('networkerror')
+    ) {
+        return new Error('Cannot reach Supabase right now. Check your internet or DNS connection, then try again.');
+    }
+
+    return error;
+}
+
 function getSummaryDashboardPeriodRange(period = summaryDashboardState.period) {
     const today = new Date();
     const endDate = toDateOnly(today);
@@ -1091,47 +1129,89 @@ function getSummaryDashboardPeriodRange(period = summaryDashboardState.period) {
     };
 }
 
-async function loadSummaryDashboardDataForRange(startDate, endDate) {
-    const scope = getScope();
+async function getCachedSummaryProducts(scope) {
+    const cacheKey = getScopeCacheKey(scope);
+    if (summaryProductsCache.has(cacheKey)) {
+        return summaryProductsCache.get(cacheKey);
+    }
+
+    const result = await repositories.getProducts(scope, { includeInactive: true });
+    if (result.error) {
+        throw result.error;
+    }
+
+    const products = result.data || [];
+    summaryProductsCache.set(cacheKey, products);
+    return products;
+}
+
+async function loadSummaryDashboardDataForRange(startDate, endDate, options = {}) {
+    const scope = options.scope || getScope();
+    const cachedProducts = options.products || await getCachedSummaryProducts(scope);
     const [
         shiftsResult,
         receiptsResult,
         supplyReceiptsResult,
-        expensesResult,
-        productsResult
+        expensesResult
     ] = await Promise.all([
         repositories.getShiftReportsByRange(scope, startDate, endDate),
         repositories.getStockReceiptsByRange(scope, startDate, endDate),
         repositories.getSupplyReceiptsByRange(scope, startDate, endDate),
-        repositories.getExpensesByRange(scope, startDate, endDate),
-        repositories.getProducts(scope, { includeInactive: true })
+        repositories.getExpensesByRange(scope, startDate, endDate)
     ]);
 
     if (shiftsResult.error) throw shiftsResult.error;
     if (receiptsResult.error) throw receiptsResult.error;
     if (supplyReceiptsResult.error) throw supplyReceiptsResult.error;
     if (expensesResult.error) throw expensesResult.error;
-    if (productsResult.error) throw productsResult.error;
 
     const shifts = annotateShiftsForDisplay(
         (shiftsResult.data || []).filter((shift) => shift.total_sales !== null),
         state.shiftSystem
     );
 
-    const shiftInventoryResult = await repositories.getShiftInventoryForShiftIds(
-        scope,
-        shifts.map((shift) => shift.id)
-    );
-    if (shiftInventoryResult.error) throw shiftInventoryResult.error;
+    let shiftInventory = [];
+    if (shifts.length) {
+        const shiftInventoryResult = await repositories.getShiftInventoryForShiftIds(
+            scope,
+            shifts.map((shift) => shift.id)
+        );
+        if (shiftInventoryResult.error) throw shiftInventoryResult.error;
+        shiftInventory = shiftInventoryResult.data || [];
+    }
 
     return {
         shifts,
         stockReceipts: receiptsResult.data || [],
         supplyReceipts: supplyReceiptsResult.data || [],
         expenses: expensesResult.data || [],
-        products: productsResult.data || [],
-        shiftInventory: shiftInventoryResult.data || []
+        products: cachedProducts,
+        shiftInventory
     };
+}
+
+function getSummaryDashboardRangeCacheKey(scope, startDate, endDate) {
+    return `${getScopeCacheKey(scope)}::${startDate}::${endDate}`;
+}
+
+async function getCachedSummaryDashboardDataForRange(scope, startDate, endDate, options = {}) {
+    const cacheKey = getSummaryDashboardRangeCacheKey(scope, startDate, endDate);
+    if (summaryDashboardDataCache.has(cacheKey)) {
+        return summaryDashboardDataCache.get(cacheKey);
+    }
+
+    const loadPromise = loadSummaryDashboardDataForRange(startDate, endDate, {
+        ...options,
+        scope
+    });
+    summaryDashboardDataCache.set(cacheKey, loadPromise);
+
+    try {
+        return await loadPromise;
+    } catch (error) {
+        summaryDashboardDataCache.delete(cacheKey);
+        throw error;
+    }
 }
 
 function groupAndRank(entries, keyBuilder, valueBuilder, qtyBuilder = null) {
@@ -1431,9 +1511,11 @@ async function loadSummaryDashboard() {
     const content = document.getElementById('summaryDashboardContent');
     const status = document.getElementById('summaryDashboardStatus');
     const periodMeta = getSummaryDashboardPeriodRange(summaryDashboardState.period);
+    const scope = getScope();
+    const weekMeta = getSummaryDashboardPeriodRange('week');
+    const monthMeta = getSummaryDashboardPeriodRange('month');
+    const yearMeta = getSummaryDashboardPeriodRange('year');
     const year = new Date().getFullYear();
-    const yearStart = `${year}-01-01`;
-    const yearEnd = `${year}-12-31`;
 
     document.getElementById('summaryPeriodWeekBtn')?.setAttribute('style', summaryDashboardState.period === 'week' ? 'background:#7092ae; color:white;' : 'background:#edf2f7; color:#2d3748;');
     document.getElementById('summaryPeriodMonthBtn')?.setAttribute('style', summaryDashboardState.period === 'month' ? 'background:#7092ae; color:white;' : 'background:#edf2f7; color:#2d3748;');
@@ -1442,12 +1524,57 @@ async function loadSummaryDashboard() {
     if (status) status.innerText = 'Loading summary...';
     if (content) content.innerHTML = '';
 
-    const [periodData, annualData] = await Promise.all([
-        loadSummaryDashboardDataForRange(periodMeta.startDate, periodMeta.endDate),
-        loadSummaryDashboardDataForRange(yearStart, yearEnd)
+    const products = await getCachedSummaryProducts(scope);
+    const [weekData, monthData, yearData] = await Promise.all([
+        getCachedSummaryDashboardDataForRange(scope, weekMeta.startDate, weekMeta.endDate, { products }),
+        getCachedSummaryDashboardDataForRange(scope, monthMeta.startDate, monthMeta.endDate, { products }),
+        getCachedSummaryDashboardDataForRange(scope, yearMeta.startDate, yearMeta.endDate, { products })
     ]);
 
+    const periodData = (
+        periodMeta.period === 'week'
+            ? weekData
+            : periodMeta.period === 'year'
+                ? yearData
+                : monthData
+    );
+    const annualData = yearData;
+
     renderSummaryDashboard(periodData, annualData, periodMeta);
+}
+
+async function getCachedAuditReferenceData(scope) {
+    const cacheKey = getScopeCacheKey(scope);
+    if (auditReferenceCache.has(cacheKey)) {
+        return auditReferenceCache.get(cacheKey);
+    }
+
+    const referencePromise = (async () => {
+        const [productsResult, recipesResult, rawMaterialsResult] = await Promise.all([
+            repositories.getProducts(scope),
+            repositories.getRecipes(scope),
+            repositories.getRawMaterials(scope)
+        ]);
+
+        if (productsResult.error) throw productsResult.error;
+        if (recipesResult.error) throw recipesResult.error;
+        if (rawMaterialsResult.error) throw rawMaterialsResult.error;
+
+        return {
+            products: productsResult.data || [],
+            recipes: recipesResult.data || [],
+            rawMaterials: rawMaterialsResult.data || []
+        };
+    })();
+
+    auditReferenceCache.set(cacheKey, referencePromise);
+
+    try {
+        return await referencePromise;
+    } catch (error) {
+        auditReferenceCache.delete(cacheKey);
+        throw error;
+    }
 }
 
 window.setSummaryDashboardPeriod = async (period) => {
@@ -2325,7 +2452,24 @@ function updateSalesTableHeaders() {
     soldNode.innerText = 'Sold';
 }
 
-async function loadInventory() {
+async function loadInventory(options = {}) {
+    const activePageId = options.pageId || getActivePageId();
+    const renderTargets = Array.isArray(options.renderTargets)
+        ? options.renderTargets
+        : (
+            activePageId === 'salesPage' ? ['sales']
+                : activePageId === 'finishedProductsPage' ? ['products']
+                    : activePageId === 'kitchenPage' ? ['kitchen']
+                        : []
+        );
+    const shouldLoadSupportData = options.includeSupportData ?? (
+        renderTargets.includes('sales')
+        || renderTargets.includes('kitchen')
+        || activePageId === 'financePage'
+        || activePageId === 'stocksPage'
+        || activePageId === 'matrixPage'
+    );
+
     const scope = getScope();
     const isDirectMode = isDirectSalesMode();
     const requests = [
@@ -2333,8 +2477,12 @@ async function loadInventory() {
         state.currentShift?.id
             ? repositories.getShiftInventory(scope, state.currentShift.id)
             : Promise.resolve({ data: [], error: null }),
-        repositories.getRawMaterials(scope),
-        repositories.getRecipes(scope)
+        shouldLoadSupportData
+            ? repositories.getRawMaterials(scope)
+            : Promise.resolve({ data: state.rawMaterials || [], error: null }),
+        shouldLoadSupportData
+            ? repositories.getRecipes(scope)
+            : Promise.resolve({ data: state.recipeMatrix || [], error: null })
     ];
 
     const [productsResult, shiftInventoryResult, rawMaterialsResult, recipesResult] = await Promise.all(requests);
@@ -2349,8 +2497,9 @@ async function loadInventory() {
     if (recipesResult) state.recipeMatrix = recipesResult.data || [];
 
     const shiftRows = shiftInventoryResult.data || [];
+    const shiftRowByProductId = new Map(shiftRows.map((row) => [String(row.product_id), row]));
     state.items = (products || []).map((product) => {
-        const shiftRow = shiftRows.find((row) => row.product_id === product.id);
+        const shiftRow = shiftRowByProductId.get(String(product.id));
         const directRestaurantItem = !isDirectMode && isRestaurantDirectStoreProduct(product, state.rawMaterials, state.recipeMatrix);
         const usesDirectMath = isDirectMode || directRestaurantItem;
         const directMeta = usesDirectMath
@@ -2391,10 +2540,16 @@ async function loadInventory() {
         };
     });
 
-    updateSalesTableHeaders();
-    renderSales();
-    renderFinishedProducts();
-    renderKitchen();
+    if (renderTargets.includes('sales')) {
+        updateSalesTableHeaders();
+        renderSales();
+    }
+    if (renderTargets.includes('products')) {
+        renderFinishedProducts();
+    }
+    if (renderTargets.includes('kitchen')) {
+        renderKitchen();
+    }
 }
 
 async function loadRawMaterials() {
@@ -2798,34 +2953,7 @@ async function loadBarStockIssues() {
 }
 
 async function loadKitchenData() {
-    const tbody = document.getElementById('kitchenBody');
-    if (!tbody) return;
-    if (!state.currentShift?.id) {
-        tbody.innerHTML = '<tr><td colspan="3">No active shift</td></tr>';
-        return;
-    }
-
-    const { data, error } = await repositories.getShiftInventory(getScope(), state.currentShift.id);
-    if (error) throw error;
-
-    if (!data?.length) {
-        tbody.innerHTML = '<tr><td colspan="3">No production yet</td></tr>';
-        return;
-    }
-
-    const productNames = new Map(state.items.map((item) => [String(item.product_id), getDisplayProductName(item.name)]));
-    const canAdjust = hasPermission(state.permissions, PERMISSIONS.POST_KITCHEN_OUTPUT);
-    tbody.innerHTML = data.map((row) => `
-        <tr>
-            <td>${productNames.get(String(row.product_id)) || 'Unknown'}</td>
-            <td>${formatQuantity(row.added_today || 0)}</td>
-            <td style="text-align:right;">
-                ${canAdjust && toNumber(row.added_today) > 0
-                    ? `<button class="btn" style="background:#edf2f7;" onclick="adjustKitchenProduction('${row.product_id}')">Adjust</button>`
-                    : '--'}
-            </td>
-        </tr>
-    `).join('');
+    renderKitchen();
 }
 
 function updateDropdowns() {
@@ -2860,9 +2988,18 @@ function updateDropdowns() {
         updateIngredientUnitHint(i);
     }
 
-    renderKitchenBatchInputs();
-    renderStockReceiptBatchInputs();
-    renderBarIssueView();
+    const activePageId = getActivePageId();
+    if (activePageId === 'kitchenPage') {
+        renderKitchenBatchInputs();
+    }
+    if (activePageId === 'stocksPage') {
+        if (currentStocksView === 'receipts') {
+            renderStockReceiptBatchInputs();
+        }
+        if (currentStocksView === 'issues') {
+            renderBarIssueView();
+        }
+    }
 }
 
 function renderKitchenBatchInputs() {
@@ -2877,6 +3014,7 @@ function renderKitchenBatchInputs() {
     }
 
     ensureKitchenDrafts();
+    const itemsById = new Map(state.items.map((item) => [String(item.product_id), item]));
 
     const selectedProductIds = state.kitchenDrafts
         .map((draft) => String(draft.productId || ''))
@@ -2891,7 +3029,7 @@ function renderKitchenBatchInputs() {
                         id="kitchenProduct${index}"
                         name="kitchenProduct${index}"
                         list="kitchenProductList${index}"
-                        value="${draft.productSearch || (state.items.find((item) => String(item.product_id) === String(draft.productId || '')) ? getDisplayProductName(state.items.find((item) => String(item.product_id) === String(draft.productId || '')).name) : '')}"
+                        value="${draft.productSearch || (itemsById.get(String(draft.productId || '')) ? getDisplayProductName(itemsById.get(String(draft.productId || '')).name) : '')}"
                         placeholder="Start typing product"
                         autocomplete="off"
                         oninput="updateKitchenDraftRow(${index}, 'productSearch', this.value)"
@@ -2941,13 +3079,23 @@ function syncKitchenDraftQty(index, value) {
 function renderKitchen() {
     const tbody = document.getElementById('kitchenBody');
     if (!tbody) return;
+    if (!state.currentShift?.id) {
+        tbody.innerHTML = '<tr><td colspan="3">No active shift</td></tr>';
+        return;
+    }
     const kitchenItems = getKitchenEligibleItems();
+    const canAdjust = hasPermission(state.permissions, PERMISSIONS.POST_KITCHEN_OUTPUT);
     tbody.innerHTML = kitchenItems.map((item) => `
         <tr>
             <td>${getDisplayProductName(item.name) || 'Unknown'}</td>
-            <td style="font-weight:bold; color:blue;">${item.added_today || 0}</td>
+            <td style="font-weight:bold; color:blue;">${formatQuantity(item.added_today || 0)}</td>
+            <td style="text-align:right;">
+                ${canAdjust && toNumber(item.added_today) > 0
+                    ? `<button class="btn" style="background:#edf2f7;" onclick="adjustKitchenProduction('${item.product_id}')">Adjust</button>`
+                    : '--'}
+            </td>
         </tr>
-    `).join('') || '<tr><td colspan="2">No production yet</td></tr>';
+    `).join('') || '<tr><td colspan="3">No production yet</td></tr>';
 }
 
 function shouldDisplaySalesItem(item) {
@@ -3758,7 +3906,43 @@ async function prepareStockTransferView() {
     renderStockTransferView();
 }
 
+async function loadStocksViewData(view = currentStocksView) {
+    const effectiveView = view || 'receipts';
+
+    if (effectiveView === 'transfers') {
+        await prepareStockTransferView();
+        return;
+    }
+
+    if (effectiveView === 'supplies') {
+        await loadSupplyItems();
+        ensureSupplyReceiptDrafts();
+        await loadSupplyReceipts();
+        return;
+    }
+
+    if (effectiveView === 'levels') {
+        await loadRawMaterials();
+        renderStoreStockLevels();
+        return;
+    }
+
+    if (effectiveView === 'issues') {
+        await Promise.all([
+            loadInventory({ pageId: 'stocksPage', renderTargets: [], includeSupportData: true }),
+            loadBarStockIssues()
+        ]);
+        renderBarIssueView();
+        return;
+    }
+
+    await loadRawMaterials();
+    renderStockReceiptBatchInputs();
+    await loadStockReceipts();
+}
+
 function setStocksView(view) {
+    currentStocksView = view || 'receipts';
     const isLevels = view === 'levels';
     const isIssues = view === 'issues';
     const isTransfers = view === 'transfers';
@@ -4358,6 +4542,56 @@ function setReportDateRange(startDate, endDate = startDate) {
     if (endDateInput) endDateInput.value = endDate || startDate || '';
 }
 
+function setLoginStatus(message = '', isError = false) {
+    const statusNode = document.getElementById('loginStatus');
+    if (!statusNode) return;
+    statusNode.innerText = message;
+    statusNode.style.color = isError ? '#fecaca' : '#e2e8f0';
+}
+
+async function primeAppSession() {
+    await Promise.all([
+        loadCurrentShift(),
+        loadBranches()
+    ]);
+    updateSidebarUserSummary();
+    updatePageBranchLabels();
+    startIdleLogoutMonitor();
+}
+
+function refreshCoreDataDeferred() {
+    if (backgroundCoreRefreshPromise) {
+        return backgroundCoreRefreshPromise;
+    }
+
+    backgroundCoreRefreshPromise = (async () => {
+        try {
+            await Promise.all([
+                loadBarStockIssues(),
+                loadSupplyItems(),
+                loadStockReceipts(),
+                loadSupplyReceipts(),
+                loadStockTransfers()
+            ]);
+        } finally {
+            backgroundCoreRefreshPromise = null;
+        }
+    })();
+
+    return backgroundCoreRefreshPromise;
+}
+
+async function primeBranchSwitchData(targetPageId) {
+    await loadCurrentShift();
+
+    if (targetPageId === 'salesPage' && isDirectSalesBranch(state.branchId)) {
+        await loadBarStockIssues();
+        return;
+    }
+
+    state.barStockIssues = [];
+}
+
 async function refreshCoreData() {
     await loadCurrentShift();
     await loadBarStockIssues();
@@ -4374,14 +4608,17 @@ async function refreshCoreData() {
 }
 
 async function initApp() {
-    await refreshCoreData();
-    updateSidebarUserSummary();
-    updatePageBranchLabels();
-    startIdleLogoutMonitor();
+    await primeAppSession();
     await window.showPage(getDefaultPage());
+    refreshCoreDataDeferred().catch((error) => {
+        console.error('Deferred core refresh failed', error);
+    });
 }
 
 window.handleLogin = async () => {
+    const button = document.getElementById('loginBtn');
+    setLoading(button, true, 'Signing In...');
+    setLoginStatus('Signing in...');
     try {
         const loginIdentifier = document.getElementById('loginUsername').value.trim();
         const password = document.getElementById('loginPass').value;
@@ -4396,11 +4633,15 @@ window.handleLogin = async () => {
             for (const candidate of candidates) {
                 ({ data, error } = await repositories.signIn(candidate, password));
                 if (!error) break;
+                if (!isCredentialRetryableError(error)) {
+                    throw normalizeLoginError(error);
+                }
             }
         }
 
-        if (error) throw error;
+        if (error) throw normalizeLoginError(error);
 
+        setLoginStatus('Loading your profile...');
         const { data: profile, error: profileError } = await repositories.getProfile(data.user.id);
         if (profileError) throw profileError;
         if (!profile?.restaurant_id) throw new Error('User profile or restaurant_id missing');
@@ -4416,12 +4657,17 @@ window.handleLogin = async () => {
             throw new Error('This account has an invalid or missing role. Please contact your system administrator.');
         }
         applyRoleAccess();
+        setLoginStatus('Preparing your workspace...');
         updatePageBranchLabels();
         document.getElementById('loginPage').style.display = 'none';
         document.getElementById('sidebar').classList.remove('hidden');
         await initApp();
+        setLoginStatus('');
     } catch (error) {
+        setLoginStatus(error.message || 'Login failed.', true);
         handleError(error, 'Login failed');
+    } finally {
+        setLoading(button, false);
     }
 };
 
@@ -4504,9 +4750,13 @@ window.switchBranchContext = async (branchId) => {
         updatePageBranchLabels();
 
         const activePage = document.querySelector('.page.active')?.id || getDefaultPage();
-        await refreshCoreData();
         const nextPage = canAccessPage(activePage) ? activePage : getDefaultPage();
+        clearReferenceDataCaches();
+        await primeBranchSwitchData(nextPage);
         await window.showPage(nextPage);
+        refreshCoreDataDeferred().catch((refreshError) => {
+            console.error('Deferred branch refresh failed', refreshError);
+        });
     } catch (error) {
         updateBranchSwitcher();
         handleError(error, 'Failed to switch branch');
@@ -5057,9 +5307,10 @@ window.saveSellingProduct = async () => {
         const { error } = await repositories.saveProduct(getScope(), { name, price, category }, id);
         if (error) throw error;
 
+        clearReferenceDataCaches();
         showAppToast('Product saved successfully!');
         window.resetProductForm();
-        await loadInventory();
+        await loadInventory({ pageId: getActivePageId(), includeSupportData: false });
         updateDropdowns();
     } catch (error) {
         handleError(error, 'Failed to save product');
@@ -5075,8 +5326,9 @@ window.deleteSellingProduct = async (id) => {
         const scope = getScope();
         const { error } = await repositories.deactivateProduct(scope, id);
         if (error) throw error;
+        clearReferenceDataCaches();
         showAppToast('Product deactivated successfully.');
-        await loadInventory();
+        await loadInventory({ pageId: getActivePageId(), includeSupportData: false });
         updateDropdowns();
     } catch (error) {
         handleError(error, 'Failed to deactivate product');
@@ -5124,6 +5376,7 @@ window.saveMasterRecipe = async () => {
 
         const { error } = await repositories.upsertRecipes(getScope(), batch);
         if (error) throw error;
+        clearReferenceDataCaches();
         showAppToast('Recipe updated successfully');
         await loadRecipes();
         window.resetRecipeForm();
@@ -5215,6 +5468,7 @@ window.deleteRecipe = async (id) => {
         requirePermission(PERMISSIONS.MANAGE_RECIPES);
         const { error } = await repositories.deleteRecipeRow(getScope(), id);
         if (error) throw error;
+        clearReferenceDataCaches();
         await loadRecipes();
     } catch (error) {
         handleError(error, 'Failed to delete recipe');
@@ -5427,9 +5681,12 @@ window.processStockReceipt = async () => {
 
         state.stockReceiptDrafts = [createStockReceiptDraft()];
         renderStockReceiptBatchInputs();
+        clearReferenceDataCaches();
         showAppToast(`Recorded ${populatedRows.length} stock receipt${populatedRows.length === 1 ? '' : 's'} successfully.`);
-        await loadStockReceipts();
-        await loadInventory();
+        await Promise.all([
+            loadStockReceipts(),
+            loadRawMaterials()
+        ]);
         updateDropdowns();
     } catch (error) {
         handleError(error, 'Failed to record stock');
@@ -5535,6 +5792,7 @@ window.processSupplyReceipt = async () => {
         }
 
         state.supplyReceiptDrafts = [createSupplyReceiptDraft()];
+        clearReferenceDataCaches();
         await loadSupplyItems();
         await loadSupplyReceipts();
         renderSupplyReceiptsView();
@@ -5641,6 +5899,7 @@ window.processStockTransfer = async () => {
         }
 
         state.stockTransferDrafts = [createStockTransferDraft()];
+        clearReferenceDataCaches();
         await loadRawMaterials();
         await loadStockTransfers();
         updateDropdowns();
@@ -5816,9 +6075,10 @@ window.processBarIssue = async () => {
         }
 
         state.barIssueDrafts = [createBarIssueDraft()];
-        await loadBarStockIssues();
-        await loadRawMaterials();
-        await loadInventory();
+        await Promise.all([
+            loadBarStockIssues(),
+            loadInventory({ pageId: 'stocksPage', renderTargets: [], includeSupportData: true })
+        ]);
         updateDropdowns();
         showAppToast(`Recorded ${populatedRows.length} bar issue${populatedRows.length === 1 ? '' : 's'} successfully.`);
     } catch (error) {
@@ -6094,6 +6354,7 @@ window.finalizeShift = async () => {
             mpesaBf: finance.mpesaClosing,
             cashBf: finance.cashAtHand
         });
+        clearReferenceDataCaches();
         setReportDateRange(closedShiftDate, closedShiftDate);
         await window.showPage('reportsPage');
         await window.loadShiftReport();
@@ -6120,29 +6381,25 @@ window.showPage = async (id) => {
               if (isDirectSalesMode()) {
                   await loadBarStockIssues();
               }
-              await loadInventory();
-              await refreshCurrentShiftSummary();
+              await loadInventory({ pageId: id });
+              if (id === 'salesPage') {
+                  await refreshCurrentShiftSummary();
+              }
         } else if (id === 'summaryPage') {
             await loadSummaryDashboard();
         } else if (id === 'kitchenPage') {
             await loadCurrentShift();
-            await loadInventory();
+            await loadInventory({ pageId: id });
             updateDropdowns();
             await loadKitchenData();
         } else if (id === 'matrixPage') {
-            await loadInventory();
+            await loadInventory({ pageId: id, renderTargets: [], includeSupportData: false });
             await loadRawMaterials();
             updateDropdowns();
         } else if (id === 'stocksPage') {
-            await loadBranches();
-            await loadRawMaterials();
-            await loadSupplyItems();
-            await loadSupplyReceipts();
-            await loadBarStockIssues();
-            await loadStockTransfers();
+            await loadStocksViewData(currentStocksView);
             updateDropdowns();
-            setStocksView('receipts');
-            renderStoreStockLevels();
+            setStocksView(currentStocksView);
         } else if (id === 'storePage') {
             await loadRawMaterials();
         } else if (id === 'reportsPage') {
@@ -6159,9 +6416,11 @@ window.showPage = async (id) => {
         } else if (id === 'manualPage') {
             renderOperationManual(document.getElementById('manualSearch')?.value || '');
         } else if (id === 'financePage') {
-              await loadInventory();
-              await loadStockReceipts();
-              await loadStockTransfers();
+              await loadInventory({ pageId: id, renderTargets: [], includeSupportData: true });
+              await Promise.all([
+                  loadStockReceipts(),
+                  loadStockTransfers()
+              ]);
               await ensureCurrentShiftKeyStoreChecks();
               ensureFinanceDrafts();
               const carry = getCarryForwardBalances(state.currentShift);
@@ -6202,16 +6461,12 @@ window.toggleInventoryNavGroup = () => {
     setInventoryNavExpanded(!inventoryNavExpanded);
 };
 window.switchStocksView = async (view) => {
-    if (view === 'transfers') {
-        try {
-            await prepareStockTransferView();
-        } catch (error) {
-            handleError(error, 'Failed to load transfer view');
-            return;
-        }
+    try {
+        await loadStocksViewData(view);
+        setStocksView(view);
+    } catch (error) {
+        handleError(error, 'Failed to load stock view');
     }
-
-    setStocksView(view);
 };
 
 window.saveRawMaterial = async () => {
@@ -6238,6 +6493,7 @@ window.saveRawMaterial = async () => {
         );
         if (error) throw error;
 
+        clearReferenceDataCaches();
         showAppToast(id ? 'Material Updated!' : 'Material Added!');
         window.resetRawForm();
         await loadRawMaterials();
@@ -6279,6 +6535,7 @@ window.importRawMaterialCsv = async () => {
         const { error } = await repositories.importRawMaterials(getScope(), rawImportRows, state.rawMaterials);
         if (error) throw error;
 
+        clearReferenceDataCaches();
         setRawImportStatus(`Imported ${rawImportRows.length} row(s). Existing material names were updated; new ones were inserted.`);
         document.getElementById('rawImportFile').value = '';
         rawImportRows = [];
@@ -6323,6 +6580,7 @@ window.importProductCsv = async () => {
         const { error } = await repositories.importProducts(getScope(), productImportRows, state.items);
         if (error) throw error;
 
+        clearReferenceDataCaches();
         setProductImportStatus(`Imported ${productImportRows.length} row(s). Existing product names were updated; new ones were inserted.`);
         document.getElementById('productImportFile').value = '';
         productImportRows = [];
@@ -6367,6 +6625,7 @@ window.importRecipeCsv = async () => {
         const { error } = await repositories.importRecipes(getScope(), recipeImportRows);
         if (error) throw error;
 
+        clearReferenceDataCaches();
         setRecipeImportStatus(`Imported ${recipeImportRows.length} row(s). Matching recipe rows were upserted.`);
         document.getElementById('recipeImportFile').value = '';
         recipeImportRows = [];
@@ -6577,6 +6836,7 @@ window.deleteRawMaterial = async (id) => {
         requirePermission(PERMISSIONS.MANAGE_RAW_MATERIALS);
         const { error } = await repositories.deleteRawMaterial(getScope(), id);
         if (error) throw error;
+        clearReferenceDataCaches();
         showAppToast('Raw material deleted successfully.');
         window.resetRawForm();
         await loadRawMaterials();
@@ -6789,24 +7049,19 @@ window.viewShiftDetail = async (shiftId) => {
 
 async function loadAuditReportData(startDate, endDate) {
     const scope = getReportScope();
+    const referenceDataPromise = getCachedAuditReferenceData(scope);
     const [
         shiftsResult,
         receiptsResult,
         supplyReceiptsResult,
         transfersResult,
-        debtsResult,
-        productsResult,
-        recipesResult,
-        rawMaterialsResult
+        debtsResult
     ] = await Promise.all([
         repositories.getShiftReportsByRange(scope, startDate, endDate),
         repositories.getStockReceiptsByRange(scope, startDate, endDate),
         repositories.getSupplyReceiptsByRange(scope, startDate, endDate),
         repositories.getStockTransfersByRange(scope, startDate, endDate),
-        repositories.getDebtsByRange(scope, startDate, endDate),
-        repositories.getProducts(scope),
-        repositories.getRecipes(scope),
-        repositories.getRawMaterials(scope)
+        repositories.getDebtsByRange(scope, startDate, endDate)
     ]);
 
     if (shiftsResult.error) throw shiftsResult.error;
@@ -6814,20 +7069,22 @@ async function loadAuditReportData(startDate, endDate) {
     if (supplyReceiptsResult.error) throw supplyReceiptsResult.error;
     if (transfersResult.error) throw transfersResult.error;
     if (debtsResult.error) throw debtsResult.error;
-    if (productsResult.error) throw productsResult.error;
-    if (recipesResult.error) throw recipesResult.error;
-    if (rawMaterialsResult.error) throw rawMaterialsResult.error;
 
     const closedShifts = annotateShiftsForDisplay(
         (shiftsResult.data || []).filter((shift) => shift.total_sales !== null),
         state.shiftSystem
     );
 
-    const shiftInventoryResult = await repositories.getShiftInventoryForShiftIds(
-        scope,
-        closedShifts.map((shift) => shift.id)
-    );
-    if (shiftInventoryResult.error) throw shiftInventoryResult.error;
+    const referenceData = await referenceDataPromise;
+    let shiftInventory = [];
+    if (closedShifts.length) {
+        const shiftInventoryResult = await repositories.getShiftInventoryForShiftIds(
+            scope,
+            closedShifts.map((shift) => shift.id)
+        );
+        if (shiftInventoryResult.error) throw shiftInventoryResult.error;
+        shiftInventory = shiftInventoryResult.data || [];
+    }
 
     return {
         shifts: closedShifts,
@@ -6835,10 +7092,10 @@ async function loadAuditReportData(startDate, endDate) {
         supplyReceipts: supplyReceiptsResult.data || [],
         stockTransfers: transfersResult.data || [],
         debts: debtsResult.data || [],
-        products: productsResult.data || [],
-        recipes: recipesResult.data || [],
-        rawMaterials: rawMaterialsResult.data || [],
-        shiftInventory: shiftInventoryResult.data || []
+        products: referenceData.products,
+        recipes: referenceData.recipes,
+        rawMaterials: referenceData.rawMaterials,
+        shiftInventory
     };
 }
 

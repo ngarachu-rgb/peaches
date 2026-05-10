@@ -90,6 +90,95 @@ const LEGACY_SHIFT_STORE_CHECK_COLUMNS = [
     'updated_at'
 ].join(', ');
 
+const PROFILE_COLUMNS = [
+    'id',
+    'email',
+    'username',
+    'full_name',
+    'role',
+    'restaurant_id',
+    'branch_id',
+    'default_branch_id',
+    'is_active',
+    'created_at'
+].join(', ');
+
+const PROFILE_COLUMNS_NO_EMAIL = [
+    'id',
+    'username',
+    'full_name',
+    'role',
+    'restaurant_id',
+    'branch_id',
+    'default_branch_id',
+    'is_active',
+    'created_at'
+].join(', ');
+
+const RAW_MATERIAL_MUTATION_COLUMNS = selectColumns('main_store', [
+    'id',
+    'restaurant_id',
+    'name',
+    'buy_unit',
+    'store_unit',
+    'conversion_factor',
+    'price',
+    'current_stock',
+    'stock_level',
+    'reorder_level',
+    'is_key_shift_item'
+].join(', '));
+
+const STOCK_RECEIPT_COLUMNS = selectColumns('stock_receipts', [
+    'id',
+    'restaurant_id',
+    'shift_id',
+    'material_name',
+    'qty_received',
+    'received_by',
+    'buy_unit',
+    'store_unit',
+    'conversion_factor',
+    'qty_posted_store',
+    'buy_unit_price',
+    'store_unit_price',
+    'total_received_cost',
+    'created_at'
+].join(', '));
+
+const BAR_STOCK_ISSUE_COLUMNS = selectColumns('bar_stock_issues', [
+    'id',
+    'restaurant_id',
+    'shift_id',
+    'source_material_name',
+    'target_product_name',
+    'qty_issued_source',
+    'source_buy_unit',
+    'qty_added_target',
+    'target_unit',
+    'conversion_factor',
+    'notes',
+    'created_by',
+    'created_at'
+].join(', '));
+
+const STOCK_TRANSFER_COLUMNS = [
+    'id',
+    'restaurant_id',
+    'from_branch_id',
+    'to_branch_id',
+    'material_name',
+    'qty',
+    'unit',
+    'notes',
+    'created_by',
+    'created_at'
+].join(', ');
+
+function getBranchCacheKey(context = {}) {
+    return String(context?.restaurantId || 'none');
+}
+
 function sanitizeShiftPayload(payload = {}) {
     const allowedKeys = new Set([
         'restaurant_id',
@@ -320,6 +409,8 @@ async function runProfileMutation(context, mutationBuilder, attempts) {
 }
 
 export function createRepositories(supabase) {
+    const branchesCache = new Map();
+
     return {
         signIn(email, password) {
             return supabase.auth.signInWithPassword({ email, password });
@@ -329,25 +420,53 @@ export function createRepositories(supabase) {
             return supabase.auth.signOut();
         },
 
-        getProfile(userId) {
+        async getProfile(userId) {
+            const richResult = await supabase
+                .from('profiles')
+                .select(PROFILE_COLUMNS)
+                .eq('id', userId)
+                .single();
+
+            if (!isMissingColumnError(richResult.error, 'profiles', 'email')) {
+                return richResult;
+            }
+
             return supabase
                 .from('profiles')
-                .select('*')
+                .select(PROFILE_COLUMNS_NO_EMAIL)
                 .eq('id', userId)
                 .single();
         },
 
-        getStaffProfiles(context) {
+        async getStaffProfiles(context) {
+            const richResult = await applyScope(
+                supabase
+                    .from('profiles')
+                    .select(PROFILE_COLUMNS),
+                'profiles',
+                context
+            );
+
+            if (!isMissingColumnError(richResult.error, 'profiles', 'email')) {
+                return richResult;
+            }
+
             return applyScope(
                 supabase
                     .from('profiles')
-                    .select('*'),
+                    .select(PROFILE_COLUMNS_NO_EMAIL),
                 'profiles',
                 context
             );
         },
 
         async getBranches(context) {
+            const cacheKey = getBranchCacheKey(context);
+            if (branchesCache.has(cacheKey)) {
+                return branchesCache.get(cacheKey);
+            }
+
+            const loadPromise = (async () => {
             const withConfig = await applyScope(
                 supabase
                     .from('branches')
@@ -389,9 +508,31 @@ export function createRepositories(supabase) {
                 context,
                 { branch: false }
             );
+            })();
+
+            branchesCache.set(cacheKey, loadPromise);
+
+            try {
+                const result = await loadPromise;
+                if (result?.error) {
+                    branchesCache.delete(cacheKey);
+                }
+                return result;
+            } catch (error) {
+                branchesCache.delete(cacheKey);
+                throw error;
+            }
         },
 
         async getBranchById(context, branchId) {
+            const cachedBranches = await this.getBranches(context);
+            if (!cachedBranches.error && Array.isArray(cachedBranches.data)) {
+                const matchedBranch = cachedBranches.data.find((branch) => String(branch.id) === String(branchId || ''));
+                if (matchedBranch) {
+                    return { data: matchedBranch, error: null };
+                }
+            }
+
             const withConfig = await fetchFirstRow(
                 applyScope(
                     supabase
@@ -609,7 +750,7 @@ export function createRepositories(supabase) {
             return supabase
                 .from('shifts')
                 .insert([record])
-                .select('*')
+                .select(selectColumns('shifts', LEGACY_SHIFT_COLUMNS))
                 .single();
         },
 
@@ -618,7 +759,7 @@ export function createRepositories(supabase) {
                 .from('shifts')
                 .update(sanitizeShiftPayload(payload))
                 .eq('id', shiftId)
-                .select('*')
+                .select(selectColumns('shifts', LEGACY_SHIFT_COLUMNS))
                 .single();
         },
 
@@ -969,7 +1110,7 @@ export function createRepositories(supabase) {
             ];
 
             return runMutationAttempts(
-                (record) => supabase.from('main_store').insert([record]).select('*').single(),
+                (record) => supabase.from('main_store').insert([record]).select(RAW_MATERIAL_MUTATION_COLUMNS).single(),
                 attempts,
                 [
                     { tableName: 'main_store', columnName: 'reorder_level' },
@@ -1241,7 +1382,7 @@ export function createRepositories(supabase) {
             ];
 
             return runMutationAttempts(
-                (record) => supabase.from('stock_receipts').insert([record]).select('*').single(),
+                (record) => supabase.from('stock_receipts').insert([record]).select(STOCK_RECEIPT_COLUMNS).single(),
                 attempts,
                 [
                     { tableName: 'stock_receipts', columnName: 'shift_id' },
@@ -1394,7 +1535,7 @@ export function createRepositories(supabase) {
                     notes: payload.notes,
                     created_by: payload.createdBy
                 })])
-                .select('*')
+                .select(BAR_STOCK_ISSUE_COLUMNS)
                 .single();
         },
 
@@ -1411,7 +1552,7 @@ export function createRepositories(supabase) {
             return applyScope(
                 supabase
                     .from('stock_transfers')
-                    .select('id, restaurant_id, from_branch_id, to_branch_id, material_name, qty, unit, notes, created_by, created_at')
+                    .select(STOCK_TRANSFER_COLUMNS)
                     .filter('created_at', 'gte', `${startDate}T00:00:00Z`)
                     .filter('created_at', 'lte', `${effectiveEndDate}T23:59:59Z`)
                     .order('created_at', { ascending: false }),
@@ -1434,7 +1575,7 @@ export function createRepositories(supabase) {
                     notes: payload.notes,
                     created_by: payload.createdBy
                 }])
-                .select('*')
+                .select(STOCK_TRANSFER_COLUMNS)
                 .single();
         },
 
@@ -1609,7 +1750,7 @@ export function createRepositories(supabase) {
             return applyScope(
                 supabase
                     .from('shifts')
-                    .select('*')
+                    .select(selectColumns('shifts', LEGACY_SHIFT_COLUMNS))
                     .eq('id', shiftId),
                 'shifts',
                 context
