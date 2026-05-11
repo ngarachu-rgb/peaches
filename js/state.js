@@ -23,6 +23,7 @@ export const state = {
     recipeMatrix: [],
     currentShiftTotal: 0,
     currentShift: null,
+    currentShiftInventoryRows: [],
     shiftSeed: null,
     salesDrafts: {},
     financeDraft: {
@@ -133,6 +134,7 @@ export function resetAppState() {
     state.recipeMatrix = [];
     state.currentShiftTotal = 0;
     state.currentShift = null;
+    state.currentShiftInventoryRows = [];
     state.shiftSeed = null;
     state.salesDrafts = {};
     state.financeDraft = {

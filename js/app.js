@@ -2259,6 +2259,12 @@ function setLoading(button, isLoading, text = 'Processing...') {
     button.innerText = isLoading ? text : button.dataset.originalText;
 }
 
+function isConcurrentShiftCloseError(error) {
+    const message = String(error?.message || '').toLowerCase();
+    return message.includes('already closed from another session')
+        || message.includes('moved to a different open shift from another session');
+}
+
 async function loadCurrentShift() {
     state.currentShift = await ensureActiveShift(getScope(), repositories);
     await refreshCurrentShiftSummary();
@@ -2518,6 +2524,7 @@ async function loadInventory(options = {}) {
     if (recipesResult) state.recipeMatrix = recipesResult.data || [];
 
     const shiftRows = shiftInventoryResult.data || [];
+    state.currentShiftInventoryRows = shiftRows;
     const shiftRowByProductId = new Map(shiftRows.map((row) => [String(row.product_id), row]));
     state.items = (products || []).map((product) => {
         const shiftRow = shiftRowByProductId.get(String(product.id));
@@ -2858,13 +2865,17 @@ function getCurrentShiftTransfersForBranch() {
     });
 }
 
+function getCurrentShiftReceipts() {
+    return (state.stockReceipts || []).filter((row) => isRecordInCurrentShiftWindow(row));
+}
+
 function buildKeyStoreCheckRows() {
     const keyMaterials = getKeyShiftControlMaterials();
     const existingByMaterialId = new Map((state.keyStoreChecks || []).map((row) => [String(row.material_id || ''), row]));
-    const receiptRows = state.stockReceipts || [];
+    const receiptRows = getCurrentShiftReceipts();
     const transferRows = getCurrentShiftTransfersForBranch();
     const recipeRows = state.recipeMatrix || [];
-    const items = state.items || [];
+    const currentShiftRowsByProductId = new Map((state.currentShiftInventoryRows || []).map((row) => [String(row.product_id || ''), row]));
 
     return keyMaterials.map((material) => {
         const existingRow = existingByMaterialId.get(String(material.id)) || null;
@@ -2883,8 +2894,13 @@ function buildKeyStoreCheckRows() {
             if (!entityNamesMatch(recipe.material_name, materialName)) {
                 return sum;
             }
-            const item = items.find((entry) => entityNamesMatch(entry.name, recipe.finished_item_name));
-            return sum + (toNumber(item?.added_today) * toNumber(recipe.qty_per_unit));
+            const product = (state.items || []).find((entry) => entityNamesMatch(entry.name, recipe.finished_item_name));
+            if (!product?.product_id) {
+                return sum;
+            }
+            const shiftRow = currentShiftRowsByProductId.get(String(product.product_id));
+            const producedQty = toNumber(shiftRow?.added_today);
+            return sum + (producedQty * toNumber(recipe.qty_per_unit));
         }, 0);
         const expectedQty = openingQty + receivedQty + transferredInQty - transferredOutQty - kitchenConsumedQty;
         const draftValue = state.keyStoreCheckDrafts[String(material.id)];
@@ -6395,16 +6411,29 @@ window.finalizeShift = async () => {
             cash_at_hand: finance.cashAtHand
         };
         state.currentShiftTotal = 0;
+        state.keyStoreChecks = [];
+        state.keyStoreCheckDrafts = {};
         applyNextShiftFinanceReset({
             mpesaBf: finance.mpesaClosing,
             cashBf: finance.cashAtHand
         });
         clearReferenceDataCaches();
+        await ensureShiftTeamMembers();
         setReportDateRange(closedShiftDate, closedShiftDate);
         await window.showPage('reportsPage');
         await window.loadShiftReport();
         showAppToast(`Shift closed successfully. Recorded sales: KES ${formatMoney(finance.totalSales)}.`);
     } catch (error) {
+        if (isConcurrentShiftCloseError(error)) {
+            try {
+                state.keyStoreChecks = [];
+                state.keyStoreCheckDrafts = {};
+                await loadCurrentShift();
+                await window.showPage('salesPage');
+            } catch (refreshError) {
+                console.error('Failed to refresh after concurrent shift close', refreshError);
+            }
+        }
         handleError(error, 'Shift close failed');
     } finally {
         setLoading(button, false);
@@ -6440,6 +6469,7 @@ window.showPage = async (id) => {
         } else if (id === 'matrixPage') {
             await loadInventory({ pageId: id, renderTargets: [], includeSupportData: false });
             await loadRawMaterials();
+            await loadRecipes();
             updateDropdowns();
         } else if (id === 'stocksPage') {
             await loadStocksViewData(currentStocksView);

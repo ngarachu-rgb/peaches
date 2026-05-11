@@ -344,6 +344,7 @@ async function closeDirectSalesShift(context, repositories, currentShift, payloa
     let closedShift = null;
     let nextShift = null;
     const appliedDeductions = [];
+    const appliedKeyStoreResets = [];
 
     try {
         for (const expenseLine of payload.expenseLines || []) {
@@ -840,13 +841,27 @@ export async function adjustReverseDispatch(context, repositories, shiftId, prod
 }
 
 export async function closeShiftWithCarryForward(context, repositories, currentShift, payload) {
+    const { data: liveShift, error: liveShiftError } = await repositories.getShiftById(context, currentShift?.id);
+    if (liveShiftError) throw liveShiftError;
+    if (!liveShift?.id) {
+        throw new Error('This shift could not be found. Refresh the branch and try again.');
+    }
+    if (liveShift.total_sales !== null) {
+        const { data: currentOpenShift, error: currentOpenShiftError } = await repositories.getOpenShift(context);
+        if (currentOpenShiftError) throw currentOpenShiftError;
+        const nextShiftLabel = currentOpenShift?.id
+            ? ` Current open shift: ${currentOpenShift.id}.`
+            : '';
+        throw new Error(`This shift was already closed from another session.${nextShiftLabel} Refresh to continue on the latest shift.`);
+    }
+
     const { data: openShifts, error: openShiftError } = await repositories.getOpenShifts(context);
     if (openShiftError) throw openShiftError;
 
     const conflictingOpenShifts = (openShifts || []).filter((shift) => String(shift.id) !== String(currentShift?.id));
     if (conflictingOpenShifts.length > 0) {
         const shiftIds = conflictingOpenShifts.map((shift) => shift.id).join(', ');
-        throw new Error(`Another open shift exists. Resolve it before closing this shift. Open shift ids: ${shiftIds}`);
+        throw new Error(`This branch has already moved to a different open shift from another session. Open shift ids: ${shiftIds}. Refresh to continue on the latest shift.`);
     }
 
     if (context.operatingMode === 'DIRECT_SALES') {
@@ -925,6 +940,7 @@ export async function closeShiftWithCarryForward(context, repositories, currentS
     let closedShift = null;
     let nextShift = null;
     const appliedDeductions = [];
+    const appliedKeyStoreResets = [];
 
     try {
         for (const expenseLine of payload.expenseLines || []) {
@@ -1003,6 +1019,9 @@ export async function closeShiftWithCarryForward(context, repositories, currentS
         if (inventoryError) throw inventoryError;
 
         if (keyStoreChecks.length > 0) {
+            const rawMaterialsResult = await repositories.getRawMaterials(context);
+            if (rawMaterialsResult.error) throw rawMaterialsResult.error;
+            const rawMaterialById = new Map((rawMaterialsResult.data || []).map((material) => [String(material.id || ''), material]));
             const checkRows = keyStoreChecks.map((row) => ({
                 id: row.id || undefined,
                 shift_id: currentShift.id,
@@ -1018,6 +1037,25 @@ export async function closeShiftWithCarryForward(context, repositories, currentS
             }));
             const checkUpsertResult = await repositories.upsertShiftStoreChecks(context, checkRows);
             if (checkUpsertResult.error) throw checkUpsertResult.error;
+
+            for (const row of keyStoreChecks) {
+                const material = rawMaterialById.get(String(row.materialId || ''));
+                if (!material?.id) {
+                    throw new Error(`Key store material "${row.materialName || 'Unknown'}" was not found in branch stock.`);
+                }
+
+                appliedKeyStoreResets.push({
+                    materialId: material.id,
+                    previousStockLevel: toNumber(material.stock_level ?? material.current_stock)
+                });
+
+                const stockResetResult = await repositories.updateRawMaterialStockLevel(
+                    context,
+                    material.id,
+                    toNumber(row.actualClosingQty)
+                );
+                if (stockResetResult.error) throw stockResetResult.error;
+            }
         }
 
         const closeResult = await repositories.updateShift(currentShift.id, {
@@ -1096,6 +1134,10 @@ export async function closeShiftWithCarryForward(context, repositories, currentS
             finance
         };
     } catch (error) {
+        for (const reset of appliedKeyStoreResets.reverse()) {
+            await repositories.updateRawMaterialStockLevel(context, reset.materialId, reset.previousStockLevel);
+        }
+
         for (const deduction of appliedDeductions.reverse()) {
             await repositories.adjustRawMaterialStoreStock(context, deduction.materialName, deduction.qty);
         }
