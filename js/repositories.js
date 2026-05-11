@@ -525,11 +525,14 @@ export function createRepositories(supabase) {
         },
 
         async getBranchById(context, branchId) {
-            const cachedBranches = await this.getBranches(context);
-            if (!cachedBranches.error && Array.isArray(cachedBranches.data)) {
-                const matchedBranch = cachedBranches.data.find((branch) => String(branch.id) === String(branchId || ''));
-                if (matchedBranch) {
-                    return { data: matchedBranch, error: null };
+            const cacheKey = getBranchCacheKey(context);
+            if (branchesCache.has(cacheKey)) {
+                const cachedBranches = await branchesCache.get(cacheKey);
+                if (!cachedBranches.error && Array.isArray(cachedBranches.data)) {
+                    const matchedBranch = cachedBranches.data.find((branch) => String(branch.id) === String(branchId || ''));
+                    if (matchedBranch) {
+                        return { data: matchedBranch, error: null };
+                    }
                 }
             }
 

@@ -865,14 +865,14 @@ function autoResizeTextarea(textarea) {
 function setRawImportStatus(message, isError = false) {
     const status = document.getElementById('rawImportStatus');
     if (!status) return;
-    status.innerText = `${branchName} - closed shifts only`;
+    status.innerText = message || '';
     status.style.color = isError ? '#dc2626' : '#64748b';
 }
 
 function setAuditReportStatus(message, isError = false) {
     const status = document.getElementById('auditReportStatus');
     if (!status) return;
-    status.innerText = `${branchName} - closed shifts only`;
+    status.innerText = message || '';
     status.style.color = isError ? '#dc2626' : '#64748b';
 }
 
@@ -1243,7 +1243,9 @@ function getSummaryDashboardMetrics(data) {
     const salesTotal = (data.shifts || []).reduce((sum, shift) => sum + toNumber(shift.total_sales), 0);
     const stockPurchaseTotal = (data.stockReceipts || []).reduce((sum, row) => sum + toNumber(row.total_received_cost), 0);
     const supplyPurchaseTotal = (data.supplyReceipts || []).reduce((sum, row) => sum + toNumber(row.total_received_cost), 0);
-    const expenseTotal = (data.expenses || []).reduce((sum, row) => sum + toNumber(row.amount), 0);
+    const detailedExpenseTotal = (data.expenses || []).reduce((sum, row) => sum + toNumber(row.amount), 0);
+    const shiftExpenseTotal = (data.shifts || []).reduce((sum, shift) => sum + toNumber(shift.total_expenses), 0);
+    const expenseTotal = shiftExpenseTotal > 0 ? shiftExpenseTotal : detailedExpenseTotal;
     const totalExpenditure = stockPurchaseTotal + supplyPurchaseTotal + expenseTotal;
     const netPosition = salesTotal - totalExpenditure;
 
@@ -1341,7 +1343,7 @@ function getSummaryDashboardMetrics(data) {
 
 function getAnnualSummaryChartData(data, year) {
     const monthLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    const months = monthLabels.map((label, index) => ({ label, monthIndex: index, sales: 0, expenditure: 0 }));
+    const months = monthLabels.map((label, index) => ({ label, monthIndex: index, sales: 0, purchases: 0 }));
 
     (data.shifts || []).forEach((shift) => {
         const sourceDate = shift.shift_date || shift.created_at;
@@ -1350,68 +1352,87 @@ function getAnnualSummaryChartData(data, year) {
         months[date.getMonth()].sales += toNumber(shift.total_sales);
     });
 
-    const addExpenseToMonth = (dateValue, amount) => {
+    const addPurchaseToMonth = (dateValue, amount) => {
         const date = new Date(dateValue);
         if (date.getFullYear() !== year) return;
-        months[date.getMonth()].expenditure += toNumber(amount);
+        months[date.getMonth()].purchases += toNumber(amount);
     };
 
-    (data.stockReceipts || []).forEach((row) => addExpenseToMonth(row.created_at, row.total_received_cost));
-    (data.supplyReceipts || []).forEach((row) => addExpenseToMonth(row.created_at, row.total_received_cost));
-    (data.expenses || []).forEach((row) => addExpenseToMonth(row.created_at, row.amount));
+    (data.stockReceipts || []).forEach((row) => addPurchaseToMonth(row.created_at, row.total_received_cost));
+    (data.supplyReceipts || []).forEach((row) => addPurchaseToMonth(row.created_at, row.total_received_cost));
 
     return months;
 }
 
 function renderSummaryMetricCard(label, value, hint = '', valueStyle = '') {
     return `
-        <div style="background:#ffffff; border:1px solid #dbe4ee; border-radius:12px; padding:12px; box-shadow:0 4px 12px rgba(15,23,42,0.05);">
-            <div style="font-size:10px; color:#64748b; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:4px; font-weight:800;">${label}</div>
-            <div style="font-size:22px; font-weight:800; color:#0f172a; line-height:1.1; ${valueStyle}">${value}</div>
-            ${hint ? `<div style="font-size:11px; color:#64748b; margin-top:4px; line-height:1.2;">${hint}</div>` : ''}
+        <div style="background:#ffffff; border:1px solid #dde6ef; border-radius:12px; padding:14px 15px; box-shadow:0 3px 10px rgba(15,23,42,0.04);">
+            <div style="font-size:10px; color:#7b8794; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:6px; font-weight:600;">${label}</div>
+            <div style="font-size:24px; font-weight:600; color:#0f172a; line-height:1.08; letter-spacing:-0.02em; ${valueStyle}">${value}</div>
+            ${hint ? `<div style="font-size:11px; color:#6b7280; margin-top:6px; line-height:1.35; font-weight:400;">${hint}</div>` : ''}
         </div>
     `;
 }
 
 function renderSummaryListPanel(title, rows, renderRow, emptyText) {
     return `
-        <div style="background:#ffffff; border:1px solid #dbe4ee; border-radius:12px; padding:12px; box-shadow:0 4px 12px rgba(15,23,42,0.05);">
-            <div style="font-size:10px; color:#64748b; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:8px; font-weight:800;">${title}</div>
+        <div style="background:#ffffff; border:1px solid #dde6ef; border-radius:12px; padding:14px 15px; box-shadow:0 3px 10px rgba(15,23,42,0.04);">
+            <div style="font-size:10px; color:#7b8794; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:10px; font-weight:600;">${title}</div>
             ${(rows || []).length ? `
-                <div style="display:grid; gap:7px;">
+                <div style="display:grid; gap:8px;">
                     ${(rows || []).map(renderRow).join('')}
                 </div>
-            ` : `<div style="font-size:12px; color:#94a3b8;">${emptyText}</div>`}
+            ` : `<div style="font-size:12px; color:#94a3b8; font-weight:400;">${emptyText}</div>`}
         </div>
     `;
 }
 
 function renderAnnualSummaryChart(months, year) {
-    const maxValue = Math.max(1, ...months.flatMap((month) => [month.sales, month.expenditure]));
+    const maxValue = Math.max(1, ...months.flatMap((month) => [month.sales, month.purchases]));
+    const roundedMax = Math.ceil(maxValue / 10000) * 10000;
+    const chartMax = Math.max(roundedMax, 10000);
+    const tickCount = 4;
+    const tickValues = Array.from({ length: tickCount + 1 }, (_, index) => Math.round((chartMax / tickCount) * (tickCount - index)));
+
     return `
-        <div style="background:#ffffff; border:1px solid #dbe4ee; border-radius:12px; padding:12px; box-shadow:0 4px 12px rgba(15,23,42,0.05);">
-            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
+        <div style="background:#ffffff; border:1px solid #dde6ef; border-radius:12px; padding:16px 18px; box-shadow:0 3px 10px rgba(15,23,42,0.04);">
+            <div style="display:flex; justify-content:space-between; align-items:flex-end; gap:8px; flex-wrap:wrap; margin-bottom:14px;">
                 <div>
-                    <div style="font-size:10px; color:#64748b; text-transform:uppercase; letter-spacing:0.06em; font-weight:800;">Annual Trend</div>
-                    <div style="font-size:16px; font-weight:800; color:#0f172a;">Sales vs Spend - ${year}</div>
+                    <div style="font-size:10px; color:#7b8794; text-transform:uppercase; letter-spacing:0.08em; font-weight:600;">Annual Trend</div>
+                    <div style="font-size:18px; font-weight:600; color:#0f172a; letter-spacing:-0.02em;">Sales vs Purchases · ${year}</div>
                 </div>
-                <div style="display:flex; gap:12px; flex-wrap:wrap; font-size:11px; color:#475569;">
-                    <span style="display:inline-flex; align-items:center; gap:6px;"><span style="width:12px; height:12px; border-radius:3px; background:#1d4ed8;"></span>Sales</span>
-                    <span style="display:inline-flex; align-items:center; gap:6px;"><span style="width:12px; height:12px; border-radius:3px; background:#ea580c;"></span>Spend</span>
+                <div style="display:flex; gap:14px; flex-wrap:wrap; font-size:11px; color:#64748b; font-weight:500;">
+                    <span style="display:inline-flex; align-items:center; gap:6px;"><span style="width:11px; height:11px; border-radius:3px; background:#cf4d4d;"></span>Sales</span>
+                    <span style="display:inline-flex; align-items:center; gap:6px;"><span style="width:11px; height:11px; border-radius:3px; background:#20b5ae;"></span>Purchases</span>
                 </div>
             </div>
-            <div style="font-size:10px; font-weight:700; color:#64748b; margin-bottom:6px;">Amounts in KES</div>
-            <div style="display:grid; grid-template-columns:repeat(12, minmax(40px, 1fr)); gap:8px; align-items:end; min-height:220px;">
-                ${months.map((month) => `
-                    <div style="display:grid; gap:5px; align-items:end;">
-                        <div style="display:flex; align-items:flex-end; justify-content:center; gap:4px; min-height:176px;">
-                            <div title="Sales: Kshs ${formatMoney(month.sales)}" style="width:12px; height:${Math.max(4, (month.sales / maxValue) * 166)}px; background:#1d4ed8; border-radius:5px 5px 0 0;"></div>
-                            <div title="Spend: Kshs ${formatMoney(month.expenditure)}" style="width:12px; height:${Math.max(4, (month.expenditure / maxValue) * 166)}px; background:#ea580c; border-radius:5px 5px 0 0;"></div>
+            <div style="font-size:10px; color:#8a97a6; margin-bottom:8px; font-weight:500;">Kshs</div>
+            <div style="display:grid; grid-template-columns:64px minmax(0, 1fr); gap:10px; align-items:stretch;">
+                <div style="display:grid; grid-template-rows:repeat(${tickValues.length}, 1fr); min-height:280px;">
+                    ${tickValues.map((value) => `
+                        <div style="display:flex; align-items:flex-start; justify-content:flex-end; font-size:11px; color:#768396; padding-right:6px; transform:translateY(-7px);">
+                            ${formatMoney(value)}
                         </div>
-                        <div style="font-size:9px; color:#64748b; text-align:center; line-height:1.15;">Kshs ${formatMoney(Math.max(month.sales, month.expenditure))}</div>
-                        <div style="font-size:11px; color:#475569; text-align:center; font-weight:700;">${month.label}</div>
+                    `).join('')}
+                </div>
+                <div style="position:relative; min-height:280px;">
+                    <div style="position:absolute; inset:0; display:grid; grid-template-rows:repeat(${tickValues.length}, 1fr); pointer-events:none;">
+                        ${tickValues.map(() => `
+                            <div style="border-top:1px solid #e5e7eb;"></div>
+                        `).join('')}
                     </div>
-                `).join('')}
+                    <div style="position:relative; display:grid; grid-template-columns:repeat(12, minmax(34px, 1fr)); gap:12px; align-items:end; min-height:280px; padding-top:10px;">
+                        ${months.map((month) => `
+                            <div style="display:grid; grid-template-rows:minmax(0, 1fr) auto; gap:10px; height:100%;">
+                                <div style="display:flex; align-items:flex-end; justify-content:center; gap:5px; min-height:220px;">
+                                    <div title="Sales: Kshs ${formatMoney(month.sales)}" style="width:10px; height:${Math.max(3, (month.sales / chartMax) * 220)}px; background:#cf4d4d; border-radius:3px 3px 0 0;"></div>
+                                    <div title="Purchases: Kshs ${formatMoney(month.purchases)}" style="width:10px; height:${Math.max(3, (month.purchases / chartMax) * 220)}px; background:#20b5ae; border-radius:3px 3px 0 0;"></div>
+                                </div>
+                                <div style="font-size:11px; color:#64748b; text-align:center; font-weight:500;">${month.label}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
             </div>
         </div>
     `;
@@ -1451,12 +1472,12 @@ function renderSummaryDashboard(data, annualData, periodMeta) {
                 metrics.topSellingItems,
                 (row, index) => `
                     <div style="display:grid; grid-template-columns:auto 1fr auto; gap:8px; align-items:center;">
-                        <div style="font-size:11px; font-weight:800; color:#64748b;">${index + 1}</div>
+                        <div style="font-size:11px; font-weight:500; color:#64748b;">${index + 1}</div>
                         <div>
-                            <div style="font-size:12px; font-weight:700; color:#0f172a;">${escapeHtml(row.label)}</div>
-                            <div style="font-size:11px; color:#64748b;">Qty ${formatQuantity(row.qty, 2)}</div>
+                            <div style="font-size:12px; font-weight:600; color:#0f172a;">${escapeHtml(row.label)}</div>
+                            <div style="font-size:11px; color:#6b7280; font-weight:400;">Qty ${formatQuantity(row.qty, 2)}</div>
                         </div>
-                        <div style="font-size:12px; font-weight:800; color:#0f172a;">KES ${formatMoney(row.value)}</div>
+                        <div style="font-size:12px; font-weight:600; color:#0f172a;">KES ${formatMoney(row.value)}</div>
                     </div>`,
                 'No sales in this period.'
             )}
@@ -1465,12 +1486,12 @@ function renderSummaryDashboard(data, annualData, periodMeta) {
                 metrics.topPurchases,
                 (row, index) => `
                     <div style="display:grid; grid-template-columns:auto 1fr auto; gap:8px; align-items:center;">
-                        <div style="font-size:12px; font-weight:800; color:#64748b;">${index + 1}</div>
+                        <div style="font-size:12px; font-weight:500; color:#64748b;">${index + 1}</div>
                         <div>
-                            <div style="font-size:12px; font-weight:700; color:#0f172a;">${escapeHtml(row.label)}</div>
-                            <div style="font-size:11px; color:#64748b;">${row.source} - ${formatQuantity(row.qty, 2)} ${escapeHtml(row.unit || '')}</div>
+                            <div style="font-size:12px; font-weight:600; color:#0f172a;">${escapeHtml(row.label)}</div>
+                            <div style="font-size:11px; color:#6b7280; font-weight:400;">${row.source} · ${formatQuantity(row.qty, 2)} ${escapeHtml(row.unit || '')}</div>
                         </div>
-                        <div style="font-size:12px; font-weight:800; color:#0f172a;">KES ${formatMoney(row.value)}</div>
+                        <div style="font-size:12px; font-weight:600; color:#0f172a;">KES ${formatMoney(row.value)}</div>
                     </div>`,
                 'No purchases in this period.'
             )}
@@ -1479,12 +1500,12 @@ function renderSummaryDashboard(data, annualData, periodMeta) {
                 metrics.topExpenditures,
                 (row, index) => `
                     <div style="display:grid; grid-template-columns:auto 1fr auto; gap:8px; align-items:center;">
-                        <div style="font-size:12px; font-weight:800; color:#64748b;">${index + 1}</div>
+                        <div style="font-size:12px; font-weight:500; color:#64748b;">${index + 1}</div>
                         <div>
-                            <div style="font-size:12px; font-weight:700; color:#0f172a;">${escapeHtml(row.label)}</div>
-                            <div style="font-size:11px; color:#64748b;">${row.count} entries</div>
+                            <div style="font-size:12px; font-weight:600; color:#0f172a;">${escapeHtml(row.label)}</div>
+                            <div style="font-size:11px; color:#6b7280; font-weight:400;">${row.count} entries</div>
                         </div>
-                        <div style="font-size:12px; font-weight:800; color:#0f172a;">KES ${formatMoney(row.value)}</div>
+                        <div style="font-size:12px; font-weight:600; color:#0f172a;">KES ${formatMoney(row.value)}</div>
                     </div>`,
                 'No expenses in this period.'
             )}
@@ -1493,12 +1514,12 @@ function renderSummaryDashboard(data, annualData, periodMeta) {
                 metrics.topShiftSales,
                 (row, index) => `
                     <div style="display:grid; grid-template-columns:auto 1fr auto; gap:8px; align-items:center;">
-                        <div style="font-size:12px; font-weight:800; color:#64748b;">${index + 1}</div>
+                        <div style="font-size:12px; font-weight:500; color:#64748b;">${index + 1}</div>
                         <div>
-                            <div style="font-size:12px; font-weight:700; color:#0f172a;">${escapeHtml(row.date)} - ${escapeHtml(row.shift)}</div>
-                            <div style="font-size:11px; color:#64748b;">${escapeHtml(row.staff)}</div>
+                            <div style="font-size:12px; font-weight:600; color:#0f172a;">${escapeHtml(row.date)} · ${escapeHtml(row.shift)}</div>
+                            <div style="font-size:11px; color:#6b7280; font-weight:400;">${escapeHtml(row.staff)}</div>
                         </div>
-                        <div style="font-size:12px; font-weight:800; color:#0f172a;">KES ${formatMoney(row.value)}</div>
+                        <div style="font-size:12px; font-weight:600; color:#0f172a;">KES ${formatMoney(row.value)}</div>
                     </div>`,
                 'No closed shifts.'
             )}
@@ -2896,7 +2917,7 @@ function renderKeyStoreChecks() {
     if (!isRestaurantKeyStoreCheckEnabled()) {
         section.classList.add('hidden');
         body.innerHTML = '';
-        status.innerText = `${branchName} - closed shifts only`;
+        status.innerText = '';
         return;
     }
 
@@ -2904,12 +2925,12 @@ function renderKeyStoreChecks() {
     if (!rows.length) {
         section.classList.add('hidden');
         body.innerHTML = '';
-        status.innerText = `${branchName} - closed shifts only`;
+        status.innerText = 'No key store items configured for this branch.';
         return;
     }
 
     section.classList.remove('hidden');
-    status.innerText = `${branchName} - closed shifts only`;
+    status.innerText = 'Enter the actual closing balances for the tracked key store items.';
     body.innerHTML = rows.map((row) => `
         <tr style="border-bottom:1px solid #e2e8f0;">
             <td style="padding:7px 10px; font-size:12px; font-weight:600;">${getDisplayMaterialName(row.materialName)}</td>
@@ -4552,7 +4573,7 @@ function setLoginStatus(message = '', isError = false) {
 async function primeAppSession() {
     await Promise.all([
         loadCurrentShift(),
-        loadBranches()
+        loadActiveBranchContext()
     ]);
     updateSidebarUserSummary();
     updatePageBranchLabels();
@@ -4567,6 +4588,7 @@ function refreshCoreDataDeferred() {
     backgroundCoreRefreshPromise = (async () => {
         try {
             await Promise.all([
+                loadBranches(),
                 loadBarStockIssues(),
                 loadSupplyItems(),
                 loadStockReceipts(),
@@ -4579,6 +4601,29 @@ function refreshCoreDataDeferred() {
     })();
 
     return backgroundCoreRefreshPromise;
+}
+
+async function loadActiveBranchContext() {
+    const branchId = state.branchId || state.assignedBranchId || state.user?.branch_id || state.user?.default_branch_id || '';
+    if (!branchId) {
+        state.branches = [];
+        updateBranchSwitcher();
+        applyRoleAccess();
+        updatePageBranchLabels();
+        updateShiftStatusPanel();
+        return;
+    }
+
+    const { data, error } = await repositories.getBranchById(getScope(), branchId);
+    if (error) throw error;
+
+    state.branches = data ? [data] : [];
+    syncShiftSystemWithActiveBranch();
+    syncOperatingModeWithActiveBranch();
+    updateBranchSwitcher();
+    applyRoleAccess();
+    updatePageBranchLabels();
+    updateShiftStatusPanel();
 }
 
 async function primeBranchSwitchData(targetPageId) {
