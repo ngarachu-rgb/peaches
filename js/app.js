@@ -602,7 +602,10 @@ function isShiftTeamModalOpen() {
 
 function openShiftTeamModal() {
     populateShiftTeamForm();
-    openHostedModal('Shift Team Members', 'shiftTeamFormCard', () => {});
+    openHostedModal('Shift Team Members', 'shiftTeamFormCard', async () => {
+        closeAppModalImmediate();
+        await window.showPage('reportsPage');
+    });
 }
 
 async function ensureShiftTeamMembers() {
@@ -1698,9 +1701,9 @@ function updatePageBranchLabels() {
 
 function getDefaultPage() {
     const preferredPages = [
+        'reportsPage',
         'salesPage',
         'kitchenPage',
-        'reportsPage',
         'storePage',
         'finishedProductsPage',
         'accountPage'
@@ -4870,16 +4873,16 @@ window.calcSalesRow = (element) => {
 };
 
 window.dismissAppModal = () => {
-    if (appModalState.sourceId === 'shiftTeamFormCard' && getShiftTeamMembers(state.currentShift).length === 0) {
-        return;
-    }
-
     if (typeof appModalState.dismissHandler === 'function') {
         appModalState.dismissHandler();
         return;
     }
 
     closeAppModalImmediate();
+};
+
+window.cancelShiftTeamPrompt = async () => {
+    await window.dismissAppModal();
 };
 
 window.saveShiftTeamMembers = async () => {
