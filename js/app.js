@@ -2268,7 +2268,6 @@ function isConcurrentShiftCloseError(error) {
 async function loadCurrentShift() {
     state.currentShift = await ensureActiveShift(getScope(), repositories);
     await refreshCurrentShiftSummary();
-    await ensureShiftTeamMembers();
     return state.currentShift;
 }
 
@@ -6418,7 +6417,6 @@ window.finalizeShift = async () => {
             cashBf: finance.cashAtHand
         });
         clearReferenceDataCaches();
-        await ensureShiftTeamMembers();
         setReportDateRange(closedShiftDate, closedShiftDate);
         await window.showPage('reportsPage');
         await window.loadShiftReport();
@@ -6458,6 +6456,7 @@ window.showPage = async (id) => {
               await loadInventory({ pageId: id });
               if (id === 'salesPage') {
                   await refreshCurrentShiftSummary();
+                  await ensureShiftTeamMembers();
               }
         } else if (id === 'summaryPage') {
             await loadSummaryDashboard();
