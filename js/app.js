@@ -282,6 +282,19 @@ function formatQuantity(value, maximumFractionDigits = 2) {
     });
 }
 
+function roundDisplayQuantityUp(value, maximumFractionDigits = 2) {
+    const numericValue = toNumber(value);
+    const factor = 10 ** maximumFractionDigits;
+    const roundedValue = numericValue >= 0
+        ? Math.ceil((numericValue + Number.EPSILON) * factor) / factor
+        : -(Math.ceil((Math.abs(numericValue) + Number.EPSILON) * factor) / factor);
+
+    return roundedValue.toLocaleString(undefined, {
+        minimumFractionDigits: 0,
+        maximumFractionDigits
+    });
+}
+
 function normalizeSearchText(value) {
     return String(value || '')
         .toLowerCase()
@@ -2659,7 +2672,7 @@ function getRawMaterialMeta(materialName) {
 function formatRecipeUsage(materialName, qtyPerUnit) {
     const material = getRawMaterialMeta(materialName);
     const storeUnit = material?.store_unit || 'store unit';
-    return `${formatQuantity(qtyPerUnit)} ${storeUnit} / item`;
+    return `${roundDisplayQuantityUp(qtyPerUnit)} ${storeUnit} / item`;
 }
 
 function updateIngredientUnitHint(rowNumber) {
@@ -2953,8 +2966,8 @@ function renderKeyStoreChecks() {
         <tr style="border-bottom:1px solid #e2e8f0;">
             <td style="padding:7px 10px; font-size:12px; font-weight:600;">${getDisplayMaterialName(row.materialName)}</td>
             <td style="padding:7px 10px; font-size:12px;">${row.unit || '--'}</td>
-            <td style="padding:7px 10px; font-size:12px;">${formatQuantity(row.openingQty, 4)}</td>
-            <td style="padding:7px 10px; font-size:12px; font-weight:600; color:#1f2937;">${formatQuantity(row.expectedQty, 4)}</td>
+            <td style="padding:7px 10px; font-size:12px;">${roundDisplayQuantityUp(row.openingQty)}</td>
+            <td style="padding:7px 10px; font-size:12px; font-weight:600; color:#1f2937;">${roundDisplayQuantityUp(row.expectedQty)}</td>
             <td style="padding:7px 10px;">
                 <input
                     type="number"
@@ -2965,7 +2978,7 @@ function renderKeyStoreChecks() {
                     oninput="updateKeyStoreCheckDraft('${row.materialId}', this.value)"
                     style="width:88px; min-height:32px; padding:4px 8px; font-size:12px;">
             </td>
-            <td id="keyStoreVar_${row.materialId}" style="padding:7px 10px; font-size:12px; font-weight:700; ${row.varianceQty === null ? 'color:#64748b;' : getVarianceDisplayStyle(row.varianceQty)}">${row.varianceQty === null ? '--' : formatQuantity(row.varianceQty, 4)}</td>
+            <td id="keyStoreVar_${row.materialId}" style="padding:7px 10px; font-size:12px; font-weight:700; ${row.varianceQty === null ? 'color:#64748b;' : getVarianceDisplayStyle(row.varianceQty)}">${row.varianceQty === null ? '--' : roundDisplayQuantityUp(row.varianceQty)}</td>
         </tr>
     `).join('');
 }
@@ -3715,10 +3728,10 @@ function renderShiftKeyStoreRecallTable(rows) {
                             <tr style="border-bottom:1px solid #e5e7eb;">
                                 <td style="padding:8px 12px; font-size:12px; font-weight:600;">${row.item}</td>
                                 <td style="padding:8px 12px; font-size:12px;">${row.unit}</td>
-                                <td style="padding:8px 12px; font-size:12px; text-align:right;">${formatQuantity(row.opening, 4)}</td>
-                                <td style="padding:8px 12px; font-size:12px; text-align:right;">${row.expected === null ? '--' : formatQuantity(row.expected, 4)}</td>
-                                <td style="padding:8px 12px; font-size:12px; text-align:right;">${row.actual === null ? '--' : formatQuantity(row.actual, 4)}</td>
-                                <td style="padding:8px 12px; font-size:12px; text-align:right; font-weight:700; ${row.variance === null ? 'color:#64748b;' : getVarianceDisplayStyle(row.variance)}">${row.variance === null ? '--' : formatQuantity(row.variance, 4)}</td>
+                                <td style="padding:8px 12px; font-size:12px; text-align:right;">${roundDisplayQuantityUp(row.opening)}</td>
+                                <td style="padding:8px 12px; font-size:12px; text-align:right;">${row.expected === null ? '--' : roundDisplayQuantityUp(row.expected)}</td>
+                                <td style="padding:8px 12px; font-size:12px; text-align:right;">${row.actual === null ? '--' : roundDisplayQuantityUp(row.actual)}</td>
+                                <td style="padding:8px 12px; font-size:12px; text-align:right; font-weight:700; ${row.variance === null ? 'color:#64748b;' : getVarianceDisplayStyle(row.variance)}">${row.variance === null ? '--' : roundDisplayQuantityUp(row.variance)}</td>
                             </tr>
                             ${row.notes ? `
                                 <tr style="border-bottom:1px solid #e5e7eb; background:#f8fafc;">
@@ -3805,10 +3818,10 @@ function renderStoreStockLevels() {
             <tr>
                 <td>${material.name}</td>
                 <td>${material.store_unit || '--'}</td>
-                <td style="font-weight:700;">${formatQuantity(currentStock)} ${material.store_unit || ''}</td>
+                <td style="font-weight:700;">${roundDisplayQuantityUp(currentStock)} ${material.store_unit || ''}</td>
                 <td>${material.buy_unit || '--'}</td>
                 <td>${formatMoney(material.price)}</td>
-                <td>${reorderLevel !== '' ? `${formatQuantity(reorderLevel)} ${material.store_unit || ''}`.trim() : '--'}</td>
+                <td>${reorderLevel !== '' ? `${roundDisplayQuantityUp(reorderLevel)} ${material.store_unit || ''}`.trim() : '--'}</td>
                 <td>
                     <span style="display:inline-block; padding:6px 10px; border-radius:999px; background:${status.background}; color:${status.color}; font-weight:700; font-size:12px;">
                         ${status.label}
@@ -7288,13 +7301,13 @@ function buildOutOfStockReport(data) {
             const currentStock = toNumber(material.stock_level ?? material.current_stock);
             const reorderLevel = material.reorder_level === null || material.reorder_level === undefined || material.reorder_level === ''
                 ? '--'
-                : `${formatQuantity(material.reorder_level)} ${material.store_unit || ''}`.trim();
+                : `${roundDisplayQuantityUp(material.reorder_level)} ${material.store_unit || ''}`.trim();
             return {
                 ...(showBranch ? { branch: getBranchName(material.branch_id) } : {}),
                 item: getDisplayMaterialName(material.name),
                 buy_unit: material.buy_unit || '--',
                 store_unit: material.store_unit || '--',
-                current_stock: `${formatQuantity(currentStock)} ${material.store_unit || ''}`.trim(),
+                current_stock: `${roundDisplayQuantityUp(currentStock)} ${material.store_unit || ''}`.trim(),
                 reorder_level: reorderLevel,
                 latest_buy_price: formatMoney(material.price),
                 status: currentStock < 0 ? 'Negative Stock' : 'Out of Stock'

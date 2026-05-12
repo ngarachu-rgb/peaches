@@ -20,3 +20,13 @@ from pg_indexes
 where schemaname = 'public'
   and tablename in ('supply_items', 'supply_receipts')
 order by tablename, indexname;
+
+select
+    schemaname,
+    tablename,
+    policyname,
+    cmd
+from pg_policies
+where schemaname = 'public'
+  and tablename in ('supply_items', 'supply_receipts')
+order by tablename, policyname;

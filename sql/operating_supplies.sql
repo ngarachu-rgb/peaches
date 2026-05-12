@@ -37,3 +37,84 @@ on public.supply_receipts (restaurant_id, branch_id, created_at desc);
 
 create index if not exists idx_supply_receipts_shift_id
 on public.supply_receipts (shift_id);
+
+alter table public.supply_items enable row level security;
+alter table public.supply_receipts enable row level security;
+
+drop policy if exists "supply_items_select_same_restaurant" on public.supply_items;
+create policy "supply_items_select_same_restaurant"
+on public.supply_items
+for select
+to authenticated
+using (
+  restaurant_id = public.current_user_restaurant_id()
+);
+
+drop policy if exists "supply_items_insert_same_restaurant" on public.supply_items;
+create policy "supply_items_insert_same_restaurant"
+on public.supply_items
+for insert
+to authenticated
+with check (
+  restaurant_id = public.current_user_restaurant_id()
+);
+
+drop policy if exists "supply_items_update_same_restaurant" on public.supply_items;
+create policy "supply_items_update_same_restaurant"
+on public.supply_items
+for update
+to authenticated
+using (
+  restaurant_id = public.current_user_restaurant_id()
+)
+with check (
+  restaurant_id = public.current_user_restaurant_id()
+);
+
+drop policy if exists "supply_items_delete_same_restaurant" on public.supply_items;
+create policy "supply_items_delete_same_restaurant"
+on public.supply_items
+for delete
+to authenticated
+using (
+  restaurant_id = public.current_user_restaurant_id()
+);
+
+drop policy if exists "supply_receipts_select_same_restaurant" on public.supply_receipts;
+create policy "supply_receipts_select_same_restaurant"
+on public.supply_receipts
+for select
+to authenticated
+using (
+  restaurant_id = public.current_user_restaurant_id()
+);
+
+drop policy if exists "supply_receipts_insert_same_restaurant" on public.supply_receipts;
+create policy "supply_receipts_insert_same_restaurant"
+on public.supply_receipts
+for insert
+to authenticated
+with check (
+  restaurant_id = public.current_user_restaurant_id()
+);
+
+drop policy if exists "supply_receipts_update_same_restaurant" on public.supply_receipts;
+create policy "supply_receipts_update_same_restaurant"
+on public.supply_receipts
+for update
+to authenticated
+using (
+  restaurant_id = public.current_user_restaurant_id()
+)
+with check (
+  restaurant_id = public.current_user_restaurant_id()
+);
+
+drop policy if exists "supply_receipts_delete_same_restaurant" on public.supply_receipts;
+create policy "supply_receipts_delete_same_restaurant"
+on public.supply_receipts
+for delete
+to authenticated
+using (
+  restaurant_id = public.current_user_restaurant_id()
+);
