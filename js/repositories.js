@@ -1626,6 +1626,42 @@ export function createRepositories(supabase) {
             );
         },
 
+        async getExpensesByShiftIds(context, shiftIds = []) {
+            if (!shiftIds.length) {
+                return { data: [], error: null };
+            }
+
+            const richQuery = applyScope(
+                supabase
+                    .from('expenses')
+                    .select(selectColumns('expenses', 'id, restaurant_id, shift_id, amount, description, qty, unit_cost, notes, created_by, created_at'))
+                    .in('shift_id', shiftIds)
+                    .order('created_at', { ascending: false }),
+                'expenses',
+                context
+            );
+
+            const richResult = await richQuery;
+            if (!richResult.error || !(
+                isMissingColumnError(richResult.error, 'expenses', 'qty') ||
+                isMissingColumnError(richResult.error, 'expenses', 'unit_cost') ||
+                isMissingColumnError(richResult.error, 'expenses', 'notes') ||
+                isMissingColumnError(richResult.error, 'expenses', 'created_by')
+            )) {
+                return richResult;
+            }
+
+            return applyScope(
+                supabase
+                    .from('expenses')
+                    .select(selectColumns('expenses', 'id, restaurant_id, shift_id, amount, description, created_at'))
+                    .in('shift_id', shiftIds)
+                    .order('created_at', { ascending: false }),
+                'expenses',
+                context
+            );
+        },
+
         insertExpense(context, payload) {
             const attempts = [
                 attachBranchPayload('expenses', context, {

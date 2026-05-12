@@ -1168,7 +1168,7 @@ async function loadSummaryDashboardDataForRange(startDate, endDate, options = {}
         shiftsResult,
         receiptsResult,
         supplyReceiptsResult,
-        expensesResult
+        rangedExpensesResult
     ] = await Promise.all([
         repositories.getShiftReportsByRange(scope, startDate, endDate),
         repositories.getStockReceiptsByRange(scope, startDate, endDate),
@@ -1179,12 +1179,24 @@ async function loadSummaryDashboardDataForRange(startDate, endDate, options = {}
     if (shiftsResult.error) throw shiftsResult.error;
     if (receiptsResult.error) throw receiptsResult.error;
     if (supplyReceiptsResult.error) throw supplyReceiptsResult.error;
-    if (expensesResult.error) throw expensesResult.error;
+    if (rangedExpensesResult.error) throw rangedExpensesResult.error;
 
     const shifts = annotateShiftsForDisplay(
         (shiftsResult.data || []).filter((shift) => shift.total_sales !== null),
         state.shiftSystem
     );
+
+    const expensesResult = await repositories.getExpensesByShiftIds(
+        scope,
+        shifts.map((shift) => shift.id)
+    );
+    if (expensesResult.error) throw expensesResult.error;
+
+    const mergedExpenses = new Map();
+    [...(rangedExpensesResult.data || []), ...(expensesResult.data || [])].forEach((row) => {
+        if (!row?.id) return;
+        mergedExpenses.set(String(row.id), row);
+    });
 
     let shiftInventory = [];
     if (shifts.length) {
@@ -1200,7 +1212,7 @@ async function loadSummaryDashboardDataForRange(startDate, endDate, options = {}
         shifts,
         stockReceipts: receiptsResult.data || [],
         supplyReceipts: supplyReceiptsResult.data || [],
-        expenses: expensesResult.data || [],
+        expenses: [...mergedExpenses.values()],
         products: cachedProducts,
         shiftInventory
     };
@@ -1284,32 +1296,29 @@ function getSummaryDashboardMetrics(data) {
         };
     });
 
-    const topPurchases = [
-        ...groupAndRank(
-            data.stockReceipts || [],
-            (row) => `stock::${String(row.material_name || '').trim().toLowerCase()}`,
-            (row) => toNumber(row.total_received_cost),
-            (row) => toNumber(row.qty_received)
-        ).map((entry) => ({
-            label: getDisplayMaterialName(entry.rows[0]?.material_name || ''),
-            source: 'Stock',
-            qty: entry.qty,
-            value: entry.value,
-            unit: entry.rows[0]?.buy_unit || ''
-        })),
-        ...groupAndRank(
-            data.supplyReceipts || [],
-            (row) => `supply::${String(row.item_name || '').trim().toLowerCase()}`,
-            (row) => toNumber(row.total_received_cost),
-            (row) => toNumber(row.qty_received)
-        ).map((entry) => ({
-            label: getDisplaySupplyItemName(entry.rows[0]?.item_name || ''),
-            source: 'Supply',
-            qty: entry.qty,
-            value: entry.value,
-            unit: entry.rows[0]?.buy_unit || ''
-        }))
-    ].sort((left, right) => right.value - left.value).slice(0, 4);
+    const topStockReceipts = groupAndRank(
+        data.stockReceipts || [],
+        (row) => `stock::${String(row.material_name || '').trim().toLowerCase()}`,
+        (row) => toNumber(row.total_received_cost),
+        (row) => toNumber(row.qty_received)
+    ).slice(0, 5).map((entry) => ({
+        label: getDisplayMaterialName(entry.rows[0]?.material_name || ''),
+        qty: entry.qty,
+        value: entry.value,
+        unit: entry.rows[0]?.buy_unit || ''
+    }));
+
+    const topSupplyReceipts = groupAndRank(
+        data.supplyReceipts || [],
+        (row) => `supply::${String(row.item_name || '').trim().toLowerCase()}`,
+        (row) => toNumber(row.total_received_cost),
+        (row) => toNumber(row.qty_received)
+    ).slice(0, 5).map((entry) => ({
+        label: getDisplaySupplyItemName(entry.rows[0]?.item_name || ''),
+        qty: entry.qty,
+        value: entry.value,
+        unit: entry.rows[0]?.buy_unit || ''
+    }));
 
     const topExpenditures = groupAndRank(
         data.expenses || [],
@@ -1350,7 +1359,8 @@ function getSummaryDashboardMetrics(data) {
         supplyPurchaseTotal,
         expenseTotal,
         topSellingItems,
-        topPurchases,
+        topStockReceipts,
+        topSupplyReceipts,
         topExpenditures,
         topShiftSales,
         highestCashier: cashierRanks[0] || null
@@ -1498,18 +1508,32 @@ function renderSummaryDashboard(data, annualData, periodMeta) {
                 'No sales in this period.'
             )}
             ${renderSummaryListPanel(
-                'Top Buys',
-                metrics.topPurchases,
+                'Top 5 Items Received',
+                metrics.topStockReceipts,
                 (row, index) => `
                     <div style="display:grid; grid-template-columns:auto 1fr auto; gap:8px; align-items:center;">
                         <div style="font-size:12px; font-weight:500; color:#64748b;">${index + 1}</div>
                         <div>
                             <div style="font-size:12px; font-weight:600; color:#0f172a;">${escapeHtml(row.label)}</div>
-                            <div style="font-size:11px; color:#6b7280; font-weight:400;">${row.source} · ${formatQuantity(row.qty, 2)} ${escapeHtml(row.unit || '')}</div>
+                            <div style="font-size:11px; color:#6b7280; font-weight:400;">${formatQuantity(row.qty, 2)} ${escapeHtml(row.unit || '')}</div>
                         </div>
                         <div style="font-size:12px; font-weight:600; color:#0f172a;">KES ${formatMoney(row.value)}</div>
                     </div>`,
-                'No purchases in this period.'
+                'No item receipts in this period.'
+            )}
+            ${renderSummaryListPanel(
+                'Top 5 Supplies Received',
+                metrics.topSupplyReceipts,
+                (row, index) => `
+                    <div style="display:grid; grid-template-columns:auto 1fr auto; gap:8px; align-items:center;">
+                        <div style="font-size:12px; font-weight:500; color:#64748b;">${index + 1}</div>
+                        <div>
+                            <div style="font-size:12px; font-weight:600; color:#0f172a;">${escapeHtml(row.label)}</div>
+                            <div style="font-size:11px; color:#6b7280; font-weight:400;">${formatQuantity(row.qty, 2)} ${escapeHtml(row.unit || '')}</div>
+                        </div>
+                        <div style="font-size:12px; font-weight:600; color:#0f172a;">KES ${formatMoney(row.value)}</div>
+                    </div>`,
+                'No supply receipts in this period.'
             )}
             ${renderSummaryListPanel(
                 'Top Expenses',
