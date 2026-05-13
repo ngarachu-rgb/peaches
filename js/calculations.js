@@ -162,6 +162,7 @@ export function annotateShiftsForDisplay(shifts = [], configuredShiftSystem = DE
 
 export function validateShiftCloseInput({ currentShift, inventoryRows, finance }) {
     const errors = [];
+    const varianceLimit = 50;
 
     if (!currentShift?.id) errors.push('No active shift was found.');
     if (!inventoryRows?.length) errors.push('No inventory rows are available for this shift.');
@@ -179,6 +180,12 @@ export function validateShiftCloseInput({ currentShift, inventoryRows, finance }
     if (toNumber(finance?.mpesaClosing) < 0) errors.push('M-Pesa closing balance is required.');
     if (toNumber(finance?.cashAtHand) < 0) errors.push('Cash at hand is required.');
     if (toNumber(finance?.totalSales) < 0) errors.push('Total sales must be available before closing.');
+    if (Math.abs(toNumber(finance?.variance)) > varianceLimit) {
+        errors.push(
+            `Variance exceeds the allowed closing limit of +/- KES ${varianceLimit.toFixed(2)}. ` +
+            `Current variance is KES ${toNumber(finance?.variance).toFixed(2)}. Please correct the reconciliation before closing the shift.`
+        );
+    }
 
     return errors;
 }

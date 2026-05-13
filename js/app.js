@@ -25,6 +25,8 @@ let idleMonitorBound = false;
 let idleLogoutInProgress = false;
 let lastUserActivityAt = 0;
 let backgroundCoreRefreshPromise = null;
+const SHIFT_DRAFT_STORAGE_PREFIX = 'pos-shift-drafts-v1';
+let lastRestoredShiftDraftKey = '';
 const appModalState = {
     sourceId: '',
     sourceElement: null,
@@ -280,6 +282,15 @@ function formatQuantity(value, maximumFractionDigits = 2) {
         minimumFractionDigits: 0,
         maximumFractionDigits
     });
+}
+
+function getShiftDraftStorageKey({
+    restaurantId = state.restaurantId,
+    branchId = state.branchId,
+    shiftId = state.currentShift?.id
+} = {}) {
+    if (!restaurantId || !branchId || !shiftId) return '';
+    return `${SHIFT_DRAFT_STORAGE_PREFIX}::${restaurantId}::${branchId}::${shiftId}`;
 }
 
 function roundDisplayQuantityUp(value, maximumFractionDigits = 2) {
@@ -994,6 +1005,7 @@ function applyMasterPageModes() {
 }
 
 function resetBranchScopedDrafts() {
+    lastRestoredShiftDraftKey = '';
     state.currentShiftTotal = 0;
     state.currentShift = null;
     state.shiftSeed = null;
@@ -2279,6 +2291,101 @@ function createKitchenDraftRow() {
     return { productId: '', productSearch: '', qty: '' };
 }
 
+function persistShiftDraftSnapshot() {
+    const storageKey = getShiftDraftStorageKey();
+    if (!storageKey || typeof localStorage === 'undefined') return;
+
+    try {
+        syncFinanceDraftFromDom();
+        const snapshot = {
+            salesDrafts: { ...(state.salesDrafts || {}) },
+            financeDraft: {
+                ...(state.financeDraft || {}),
+                expenseLines: Array.isArray(state.financeDraft?.expenseLines) ? state.financeDraft.expenseLines : [createExpenseDraft()],
+                debtGivenLines: Array.isArray(state.financeDraft?.debtGivenLines) ? state.financeDraft.debtGivenLines : [createDebtDraft()],
+                debtPaidLines: Array.isArray(state.financeDraft?.debtPaidLines) ? state.financeDraft.debtPaidLines : [createDebtDraft()]
+            },
+            kitchenDrafts: Array.isArray(state.kitchenDrafts) ? state.kitchenDrafts : [createKitchenDraftRow()],
+            stockReceiptDrafts: Array.isArray(state.stockReceiptDrafts) ? state.stockReceiptDrafts : [createStockReceiptDraft()],
+            supplyReceiptDrafts: Array.isArray(state.supplyReceiptDrafts) ? state.supplyReceiptDrafts : [createSupplyReceiptDraft()],
+            stockTransferDestinationBranchId: state.stockTransferDestinationBranchId || '',
+            stockTransferDrafts: Array.isArray(state.stockTransferDrafts) ? state.stockTransferDrafts : [createStockTransferDraft()],
+            barIssueDrafts: Array.isArray(state.barIssueDrafts) ? state.barIssueDrafts : [createBarIssueDraft()],
+            keyStoreCheckDrafts: { ...(state.keyStoreCheckDrafts || {}) }
+        };
+
+        localStorage.setItem(storageKey, JSON.stringify(snapshot));
+    } catch (error) {
+        console.warn('Failed to persist shift drafts', error);
+    }
+}
+
+function restoreShiftDraftSnapshot() {
+    const storageKey = getShiftDraftStorageKey();
+    if (!storageKey || typeof localStorage === 'undefined') return;
+    if (storageKey === lastRestoredShiftDraftKey) return;
+
+    try {
+        const rawSnapshot = localStorage.getItem(storageKey);
+        if (!rawSnapshot) {
+            lastRestoredShiftDraftKey = storageKey;
+            return;
+        }
+
+        const snapshot = JSON.parse(rawSnapshot);
+        state.salesDrafts = snapshot?.salesDrafts && typeof snapshot.salesDrafts === 'object' ? snapshot.salesDrafts : {};
+        state.financeDraft = {
+            ...state.financeDraft,
+            ...(snapshot?.financeDraft || {}),
+            expenseLines: Array.isArray(snapshot?.financeDraft?.expenseLines) && snapshot.financeDraft.expenseLines.length
+                ? snapshot.financeDraft.expenseLines
+                : [createExpenseDraft()],
+            debtGivenLines: Array.isArray(snapshot?.financeDraft?.debtGivenLines) && snapshot.financeDraft.debtGivenLines.length
+                ? snapshot.financeDraft.debtGivenLines
+                : [createDebtDraft()],
+            debtPaidLines: Array.isArray(snapshot?.financeDraft?.debtPaidLines) && snapshot.financeDraft.debtPaidLines.length
+                ? snapshot.financeDraft.debtPaidLines
+                : [createDebtDraft()]
+        };
+        state.kitchenDrafts = Array.isArray(snapshot?.kitchenDrafts) && snapshot.kitchenDrafts.length
+            ? snapshot.kitchenDrafts
+            : [createKitchenDraftRow()];
+        state.stockReceiptDrafts = Array.isArray(snapshot?.stockReceiptDrafts) && snapshot.stockReceiptDrafts.length
+            ? snapshot.stockReceiptDrafts
+            : [createStockReceiptDraft()];
+        state.supplyReceiptDrafts = Array.isArray(snapshot?.supplyReceiptDrafts) && snapshot.supplyReceiptDrafts.length
+            ? snapshot.supplyReceiptDrafts
+            : [createSupplyReceiptDraft()];
+        state.stockTransferDestinationBranchId = snapshot?.stockTransferDestinationBranchId || '';
+        state.stockTransferDrafts = Array.isArray(snapshot?.stockTransferDrafts) && snapshot.stockTransferDrafts.length
+            ? snapshot.stockTransferDrafts
+            : [createStockTransferDraft()];
+        state.barIssueDrafts = Array.isArray(snapshot?.barIssueDrafts) && snapshot.barIssueDrafts.length
+            ? snapshot.barIssueDrafts
+            : [createBarIssueDraft()];
+        state.keyStoreCheckDrafts = snapshot?.keyStoreCheckDrafts && typeof snapshot.keyStoreCheckDrafts === 'object'
+            ? snapshot.keyStoreCheckDrafts
+            : {};
+        lastRestoredShiftDraftKey = storageKey;
+    } catch (error) {
+        console.warn('Failed to restore shift drafts', error);
+    }
+}
+
+function clearShiftDraftSnapshot(override = {}) {
+    const storageKey = getShiftDraftStorageKey(override);
+    if (!storageKey || typeof localStorage === 'undefined') return;
+
+    try {
+        localStorage.removeItem(storageKey);
+        if (lastRestoredShiftDraftKey === storageKey) {
+            lastRestoredShiftDraftKey = '';
+        }
+    } catch (error) {
+        console.warn('Failed to clear shift drafts', error);
+    }
+}
+
 function ensureKitchenDrafts() {
     if (!Array.isArray(state.kitchenDrafts) || state.kitchenDrafts.length === 0) {
         state.kitchenDrafts = [createKitchenDraftRow()];
@@ -2308,6 +2415,7 @@ function isConcurrentShiftCloseError(error) {
 async function loadCurrentShift() {
     state.currentShift = await ensureActiveShift(getScope(), repositories);
     await refreshCurrentShiftSummary();
+    restoreShiftDraftSnapshot();
     return state.currentShift;
 }
 
@@ -4774,11 +4882,16 @@ window.handleLogin = async () => {
 window.handleLogout = async (skipAlert = false) => {
     stopIdleLogoutMonitor();
     idleLogoutInProgress = true;
+    persistShiftDraftSnapshot();
     closeAppModalImmediate();
     await repositories.signOut();
     resetAppState();
     location.reload();
 };
+
+window.addEventListener('beforeunload', () => {
+    persistShiftDraftSnapshot();
+});
 
 window.renderSales = renderSales;
 window.renderFinishedProducts = renderFinishedProducts;
@@ -4843,6 +4956,7 @@ window.switchBranchContext = async (branchId) => {
             throw new Error('You can only switch within your current restaurant.');
         }
 
+        persistShiftDraftSnapshot();
         state.branchId = nextBranchId;
         state.useBranchScope = true;
         resetBranchScopedDrafts();
@@ -4899,6 +5013,7 @@ window.calcSalesRow = (element) => {
         if (item) item.closing_stock = null;
         delete state.salesDrafts[String(element.dataset.productId)];
         recalculateSalesTotals();
+        persistShiftDraftSnapshot();
         return;
     }
 
@@ -4907,6 +5022,7 @@ window.calcSalesRow = (element) => {
     if (item && !usesDirectStockMath(item)) item.closing_stock = safeValue;
     state.salesDrafts[String(element.dataset.productId)] = safeValue;
     recalculateSalesTotals();
+    persistShiftDraftSnapshot();
 };
 
 window.dismissAppModal = () => {
@@ -4990,6 +5106,7 @@ window.addExpenseLine = () => {
     ensureFinanceDrafts();
     state.financeDraft.expenseLines = [...state.financeDraft.expenseLines, createExpenseDraft()];
     renderExpenseRows();
+    persistShiftDraftSnapshot();
 };
 
 window.removeExpenseLine = (index) => {
@@ -5000,6 +5117,7 @@ window.removeExpenseLine = (index) => {
     }
     renderExpenseRows();
     window.calcRecon();
+    persistShiftDraftSnapshot();
 };
 
 window.updateExpenseLine = (index, field, value) => {
@@ -5008,6 +5126,7 @@ window.updateExpenseLine = (index, field, value) => {
         rowIndex === index ? { ...line, [field]: value } : line
     ));
     window.calcRecon();
+    persistShiftDraftSnapshot();
 };
 
 window.addDebtLine = (type) => {
@@ -5015,6 +5134,7 @@ window.addDebtLine = (type) => {
     const key = type === 'paid' ? 'debtPaidLines' : 'debtGivenLines';
     state.financeDraft[key] = [...state.financeDraft[key], createDebtDraft()];
     renderDebtRows(type);
+    persistShiftDraftSnapshot();
 };
 
 window.removeDebtLine = (type, index) => {
@@ -5026,6 +5146,7 @@ window.removeDebtLine = (type, index) => {
     }
     renderDebtRows(type);
     window.calcRecon();
+    persistShiftDraftSnapshot();
 };
 
 window.updateDebtLine = (type, index, field, value) => {
@@ -5035,12 +5156,14 @@ window.updateDebtLine = (type, index, field, value) => {
         rowIndex === index ? { ...line, [field]: value } : line
     ));
     window.calcRecon();
+    persistShiftDraftSnapshot();
 };
 
 window.addStockReceiptLine = () => {
     ensureStockReceiptDrafts();
     state.stockReceiptDrafts = [createStockReceiptDraft(), ...state.stockReceiptDrafts];
     renderStockReceiptBatchInputs();
+    persistShiftDraftSnapshot();
 };
 
 window.removeStockReceiptLine = (index) => {
@@ -5050,6 +5173,7 @@ window.removeStockReceiptLine = (index) => {
         state.stockReceiptDrafts = [createStockReceiptDraft()];
     }
     renderStockReceiptBatchInputs();
+    persistShiftDraftSnapshot();
 };
 
 window.updateStockReceiptDraft = (index, field, value) => {
@@ -5060,6 +5184,7 @@ window.updateStockReceiptDraft = (index, field, value) => {
     if (field === 'materialId') {
         renderStockReceiptBatchInputs();
     }
+    persistShiftDraftSnapshot();
 };
 
 window.selectStockReceiptMaterial = (index, value) => {
@@ -5073,6 +5198,7 @@ window.selectStockReceiptMaterial = (index, value) => {
                 : draft
         ));
         renderStockReceiptBatchInputs();
+        persistShiftDraftSnapshot();
         return;
     }
 
@@ -5088,6 +5214,7 @@ window.selectStockReceiptMaterial = (index, value) => {
                 : draft
         ));
         renderStockReceiptBatchInputs();
+        persistShiftDraftSnapshot();
         return;
     }
 
@@ -5101,12 +5228,14 @@ window.selectStockReceiptMaterial = (index, value) => {
             : draft
     ));
     renderStockReceiptBatchInputs();
+    persistShiftDraftSnapshot();
 };
 
 window.addSupplyReceiptLine = () => {
     ensureSupplyReceiptDrafts();
     state.supplyReceiptDrafts = [createSupplyReceiptDraft(), ...state.supplyReceiptDrafts];
     renderSupplyReceiptsView();
+    persistShiftDraftSnapshot();
 };
 
 window.removeSupplyReceiptLine = (index) => {
@@ -5116,6 +5245,7 @@ window.removeSupplyReceiptLine = (index) => {
         state.supplyReceiptDrafts = [createSupplyReceiptDraft()];
     }
     renderSupplyReceiptsView();
+    persistShiftDraftSnapshot();
 };
 
 window.updateSupplyReceiptDraft = (index, field, value) => {
@@ -5123,6 +5253,7 @@ window.updateSupplyReceiptDraft = (index, field, value) => {
     state.supplyReceiptDrafts = state.supplyReceiptDrafts.map((draft, rowIndex) => (
         rowIndex === index ? { ...draft, [field]: value } : draft
     ));
+    persistShiftDraftSnapshot();
 };
 
 window.selectSupplyReceiptItem = (index, value) => {
@@ -5136,6 +5267,7 @@ window.selectSupplyReceiptItem = (index, value) => {
                 : draft
         ));
         renderSupplyReceiptsView();
+        persistShiftDraftSnapshot();
         return;
     }
 
@@ -5151,6 +5283,7 @@ window.selectSupplyReceiptItem = (index, value) => {
                 : draft
         ));
         renderSupplyReceiptsView();
+        persistShiftDraftSnapshot();
         return;
     }
 
@@ -5166,6 +5299,7 @@ window.selectSupplyReceiptItem = (index, value) => {
             : draft
     ));
     renderSupplyReceiptsView();
+    persistShiftDraftSnapshot();
 };
 
 window.updateStockTransferDraft = (field, value) => {
@@ -5173,12 +5307,14 @@ window.updateStockTransferDraft = (field, value) => {
         state.stockTransferDestinationBranchId = value;
     }
     renderStockTransferView();
+    persistShiftDraftSnapshot();
 };
 
 window.addStockTransferLine = () => {
     ensureStockTransferDrafts();
     state.stockTransferDrafts = [...state.stockTransferDrafts, createStockTransferDraft()];
     renderStockTransferView();
+    persistShiftDraftSnapshot();
 };
 
 window.removeStockTransferLine = (index) => {
@@ -5188,6 +5324,7 @@ window.removeStockTransferLine = (index) => {
         state.stockTransferDrafts = [createStockTransferDraft()];
     }
     renderStockTransferView();
+    persistShiftDraftSnapshot();
 };
 
 window.updateStockTransferDraftRow = (index, field, value) => {
@@ -5198,6 +5335,7 @@ window.updateStockTransferDraftRow = (index, field, value) => {
     if (field === 'materialId') {
         renderStockTransferView();
     }
+    persistShiftDraftSnapshot();
 };
 
 window.selectStockTransferMaterial = (index, value) => {
@@ -5209,6 +5347,7 @@ window.selectStockTransferMaterial = (index, value) => {
             rowIndex === index ? { ...draft, materialId: '', materialSearch: value } : draft
         ));
         renderStockTransferView();
+        persistShiftDraftSnapshot();
         return;
     }
 
@@ -5222,6 +5361,7 @@ window.selectStockTransferMaterial = (index, value) => {
             rowIndex === index ? { ...draft, materialId: '', materialSearch: '' } : draft
         ));
         renderStockTransferView();
+        persistShiftDraftSnapshot();
         return;
     }
 
@@ -5231,12 +5371,14 @@ window.selectStockTransferMaterial = (index, value) => {
             : draft
     ));
     renderStockTransferView();
+    persistShiftDraftSnapshot();
 };
 
 window.addBarIssueLine = () => {
     ensureBarIssueDrafts();
     state.barIssueDrafts = [...state.barIssueDrafts, createBarIssueDraft()];
     renderBarIssueView();
+    persistShiftDraftSnapshot();
 };
 
 window.removeBarIssueLine = (index) => {
@@ -5246,6 +5388,7 @@ window.removeBarIssueLine = (index) => {
         state.barIssueDrafts = [createBarIssueDraft()];
     }
     renderBarIssueView();
+    persistShiftDraftSnapshot();
 };
 
 window.updateBarIssueDraftRow = (index, field, value) => {
@@ -5253,6 +5396,7 @@ window.updateBarIssueDraftRow = (index, field, value) => {
     state.barIssueDrafts = state.barIssueDrafts.map((draft, rowIndex) => (
         rowIndex === index ? { ...draft, [field]: value } : draft
     ));
+    persistShiftDraftSnapshot();
 };
 
 window.selectBarIssueSource = (index, value) => {
@@ -5269,6 +5413,7 @@ window.selectBarIssueSource = (index, value) => {
             : draft
     ));
     renderBarIssueView();
+    persistShiftDraftSnapshot();
 };
 
 window.selectBarIssueTarget = (index, value) => {
@@ -5285,6 +5430,7 @@ window.selectBarIssueTarget = (index, value) => {
             : draft
     ));
     renderBarIssueView();
+    persistShiftDraftSnapshot();
 };
 
 window.calcRecon = () => {
@@ -5320,12 +5466,14 @@ window.calcRecon = () => {
     varianceEl.innerText = formatMoney(variance);
     varianceEl.style.color = variance < -0.009 ? '#b91c1c' : variance > 0.009 ? '#166534' : '#166534';
     varianceEl.style.fontWeight = '700';
+    persistShiftDraftSnapshot();
 };
 
 window.handleFinanceNotesInput = (textarea) => {
     autoResizeTextarea(textarea);
     ensureFinanceDrafts();
     state.financeDraft.notes = textarea?.value || '';
+    persistShiftDraftSnapshot();
 };
 
 window.updateKeyStoreCheckDraft = (materialId, value) => {
@@ -5342,6 +5490,7 @@ window.updateKeyStoreCheckDraft = (materialId, value) => {
             varianceNode.style.cssText = 'padding:7px 10px; font-size:12px; font-weight:700; color:#64748b;';
         }
     }
+    persistShiftDraftSnapshot();
 };
 
 window.editSellingProduct = (id) => {
@@ -5529,6 +5678,7 @@ window.selectKitchenDraftProduct = (index, value) => {
             rowIndex === index ? { ...draft, productId: '', productSearch: value } : draft
         ));
         renderKitchenBatchInputs();
+        persistShiftDraftSnapshot();
         return;
     }
 
@@ -5538,6 +5688,7 @@ window.selectKitchenDraftProduct = (index, value) => {
             rowIndex === index ? { ...draft, productId: '', productSearch: '' } : draft
         ));
         renderKitchenBatchInputs();
+        persistShiftDraftSnapshot();
         return;
     }
 
@@ -5551,6 +5702,7 @@ window.selectKitchenDraftProduct = (index, value) => {
             rowIndex === index ? { ...draft, productId: '', productSearch: '' } : draft
         ));
         renderKitchenBatchInputs();
+        persistShiftDraftSnapshot();
         return;
     }
 
@@ -5560,6 +5712,7 @@ window.selectKitchenDraftProduct = (index, value) => {
             : draft
     ));
     renderKitchenBatchInputs();
+    persistShiftDraftSnapshot();
 };
 
 window.deleteRecipe = async (id) => {
@@ -5609,6 +5762,7 @@ window.processReverseDispatch = async () => {
         if (!state.kitchenDrafts.length) {
             state.kitchenDrafts = [createKitchenDraftRow()];
         }
+        persistShiftDraftSnapshot();
         renderKitchenBatchInputs();
         await loadInventory();
         await loadKitchenData();
@@ -5780,6 +5934,7 @@ window.processStockReceipt = async () => {
         }
 
         state.stockReceiptDrafts = [createStockReceiptDraft()];
+        persistShiftDraftSnapshot();
         renderStockReceiptBatchInputs();
         clearReferenceDataCaches();
         showAppToast(`Recorded ${populatedRows.length} stock receipt${populatedRows.length === 1 ? '' : 's'} successfully.`);
@@ -5892,6 +6047,7 @@ window.processSupplyReceipt = async () => {
         }
 
         state.supplyReceiptDrafts = [createSupplyReceiptDraft()];
+        persistShiftDraftSnapshot();
         clearReferenceDataCaches();
         await loadSupplyItems();
         await loadSupplyReceipts();
@@ -5999,6 +6155,7 @@ window.processStockTransfer = async () => {
         }
 
         state.stockTransferDrafts = [createStockTransferDraft()];
+        persistShiftDraftSnapshot();
         clearReferenceDataCaches();
         await loadRawMaterials();
         await loadStockTransfers();
@@ -6175,6 +6332,7 @@ window.processBarIssue = async () => {
         }
 
         state.barIssueDrafts = [createBarIssueDraft()];
+        persistShiftDraftSnapshot();
         await Promise.all([
             loadBarStockIssues(),
             loadInventory({ pageId: 'stocksPage', renderTargets: [], includeSupportData: true })
@@ -6440,6 +6598,8 @@ window.finalizeShift = async () => {
             closedBy: state.user?.full_name || state.user?.email || 'Staff'
         });
         const closedShiftDate = toDateOnly(result.closedShift?.created_at || new Date());
+        clearShiftDraftSnapshot({ shiftId: state.currentShift?.id });
+        clearShiftDraftSnapshot({ shiftId: result.nextShift?.id });
 
         state.currentShift = {
             ...result.nextShift,
@@ -8087,6 +8247,7 @@ window.addKitchenDraftRow = () => {
     ensureKitchenDrafts();
     state.kitchenDrafts = [...state.kitchenDrafts, createKitchenDraftRow()];
     renderKitchenBatchInputs();
+    persistShiftDraftSnapshot();
 };
 
 window.removeKitchenDraftRow = (index) => {
@@ -8094,6 +8255,7 @@ window.removeKitchenDraftRow = (index) => {
     state.kitchenDrafts = state.kitchenDrafts.filter((_, rowIndex) => rowIndex !== index);
     ensureKitchenDrafts();
     renderKitchenBatchInputs();
+    persistShiftDraftSnapshot();
 };
 
 window.updateKitchenDraftRow = (index, field, value) => {
@@ -8106,6 +8268,7 @@ window.updateKitchenDraftRow = (index, field, value) => {
     if (field !== 'productSearch') {
         renderKitchenBatchInputs();
     }
+    persistShiftDraftSnapshot();
 };
 
 window.syncKitchenDraftQty = (index, value) => {
