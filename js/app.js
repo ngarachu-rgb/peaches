@@ -8109,22 +8109,20 @@ function buildKitchenVsSalesReport(data) {
 }
 
 function buildProfitLossReport(data) {
-    const salesByItem = buildSalesByItemReport(data);
-    const rawConsumption = buildRawConsumptionReport(data);
-
-    const totalSales = salesByItem.rows.reduce((sum, row) => sum + toNumber(String(row.sales_total).replace(/,/g, '')), 0);
-    const rawCost = rawConsumption.rows.reduce((sum, row) => sum + toNumber(String(row.estimated_cost).replace(/,/g, '')), 0);
-    const expenses = data.shifts.reduce((sum, shift) => sum + toNumber(shift.total_expenses), 0);
-    const grossProfit = totalSales - rawCost;
-    const netProfit = grossProfit - expenses;
+    const totalSales = (data.shifts || []).reduce((sum, shift) => sum + toNumber(shift.total_sales), 0);
+    const itemsReceivedCost = (data.stockReceipts || []).reduce((sum, row) => sum + toNumber(row.total_received_cost), 0);
+    const suppliesReceivedCost = (data.supplyReceipts || []).reduce((sum, row) => sum + toNumber(row.total_received_cost), 0);
+    const expenses = (data.expenses || []).reduce((sum, row) => sum + toNumber(row.amount), 0);
+    const totalSpend = itemsReceivedCost + suppliesReceivedCost + expenses;
+    const profitLoss = totalSales - totalSpend;
 
     return {
         title: 'Estimated Profit / Loss',
         summary: [
             { label: 'Total Sales', value: `KES ${formatMoney(totalSales)}` },
-            { label: 'Estimated Raw Cost', value: `KES ${formatMoney(rawCost)}` },
-            { label: 'Operating Expenses', value: `KES ${formatMoney(expenses)}` },
-            { label: 'Net Profit / Loss', value: `KES ${formatMoney(netProfit)}`, style: getVarianceDisplayStyle(netProfit) }
+            { label: 'Total Spend', value: `KES ${formatMoney(totalSpend)}` },
+            { label: 'Expenses', value: `KES ${formatMoney(expenses)}` },
+            { label: 'Profit / Loss', value: `KES ${formatMoney(profitLoss)}`, style: getVarianceDisplayStyle(profitLoss) }
         ],
         columns: [
             { key: 'metric', label: 'Metric' },
@@ -8132,15 +8130,16 @@ function buildProfitLossReport(data) {
         ],
         rows: [
             { metric: 'Total Sales', value: totalSales.toLocaleString() },
-            { metric: 'Estimated Raw Material Cost', value: rawCost.toLocaleString() },
-            { metric: 'Gross Profit', value: grossProfit.toLocaleString() },
-            { metric: 'Operating Expenses', value: expenses.toLocaleString() },
-            { metric: 'Estimated Net Profit / Loss', value: netProfit.toLocaleString() }
+            { metric: 'Items Received Cost', value: itemsReceivedCost.toLocaleString() },
+            { metric: 'Supplies Received Cost', value: suppliesReceivedCost.toLocaleString() },
+            { metric: 'Expenses', value: expenses.toLocaleString() },
+            { metric: 'Total Spend', value: totalSpend.toLocaleString() },
+            { metric: 'Profit / Loss', value: profitLoss.toLocaleString() }
         ],
         notes: [
-            'This is an operating estimate, not a full accounting profit and loss statement.',
-            'It uses sales, estimated raw material consumption cost from the recipe matrix, and recorded shift expense totals.',
-            'It does not yet include broader overheads such as rent, salaries, utilities, repairs, or bank-paid expenses.'
+            'This report uses Total Sales minus Total Spend for the selected period.',
+            'Total Spend is calculated as stock item receipts plus supplies received plus recorded expense rows.',
+            'Loss appears as a negative figure and profit appears as a positive figure.'
         ]
     };
 }
