@@ -615,6 +615,12 @@ function getShiftTeamMembers(shift = state.currentShift) {
 }
 
 function populateShiftTeamForm(shift = state.currentShift) {
+    const shiftMetaValue = document.getElementById('shiftTeamPromptMetaValue');
+    if (shiftMetaValue) {
+        const shiftDate = shift?.shift_date ? formatLongDate(`${shift.shift_date}T00:00:00`) : '--';
+        const shiftType = String(shift?.shift_type || (state.shiftSystem === 2 ? 'DAY' : 'FULL') || '--').toUpperCase();
+        shiftMetaValue.textContent = `${shiftDate} ${shiftType}`.trim();
+    }
     document.getElementById('shiftTeamMember1').value = String(shift?.team_member_1 || '').trim();
     document.getElementById('shiftTeamMember2').value = String(shift?.team_member_2 || '').trim();
     document.getElementById('shiftTeamMember3').value = String(shift?.team_member_3 || '').trim();

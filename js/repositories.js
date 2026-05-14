@@ -59,7 +59,8 @@ const LEGACY_SHIFT_COLUMNS = [
     'total_debts',
     'debts_collected',
     'variance',
-    'closed_by'
+    'closed_by',
+    'reconciliation_notes'
 ].join(', ');
 
 const LEGACY_SHIFT_INVENTORY_COLUMNS = [
