@@ -780,15 +780,32 @@ export function createRepositories(supabase) {
             const activeOnlyResult = await applyScope(
                 supabase
                     .from('inventory')
-                    .select(selectColumns('inventory', 'id, restaurant_id, name, price, category, is_active'))
+                    .select(selectColumns('inventory', 'id, restaurant_id, name, price, category, is_active, is_measured_sale, measured_sale_unit_size, measured_sale_unit_label'))
                     .match(includeInactive ? {} : { is_active: true })
                     .order('name', { ascending: true }),
                 'inventory',
                 context
             );
 
-            if (!isMissingColumnError(activeOnlyResult.error, 'is_active')) {
+            if (
+                !isMissingColumnError(activeOnlyResult.error, 'is_active') &&
+                !isMissingColumnError(activeOnlyResult.error, 'inventory', 'is_measured_sale') &&
+                !isMissingColumnError(activeOnlyResult.error, 'inventory', 'measured_sale_unit_size') &&
+                !isMissingColumnError(activeOnlyResult.error, 'inventory', 'measured_sale_unit_label')
+            ) {
                 return activeOnlyResult;
+            }
+
+            const noMeasuredResult = await applyScope(
+                supabase
+                    .from('inventory')
+                    .select(selectColumns('inventory', 'id, restaurant_id, name, price, category, is_active'))
+                    .order('name', { ascending: true }),
+                'inventory',
+                context
+            );
+            if (!isMissingColumnError(noMeasuredResult.error, 'is_active')) {
+                return noMeasuredResult;
             }
 
             return applyScope(
@@ -802,18 +819,36 @@ export function createRepositories(supabase) {
         },
 
         saveProduct(context, payload, id = '') {
-            const record = attachBranchPayload('inventory', context, {
-                restaurant_id: context.restaurantId,
-                name: payload.name,
-                price: payload.price,
-                category: payload.category
-            });
+            const attempts = [
+                attachBranchPayload('inventory', context, {
+                    restaurant_id: context.restaurantId,
+                    name: payload.name,
+                    price: payload.price,
+                    category: payload.category,
+                    is_measured_sale: payload.isMeasuredSale,
+                    measured_sale_unit_size: payload.measuredSaleUnitSize,
+                    measured_sale_unit_label: payload.measuredSaleUnitLabel
+                }),
+                attachBranchPayload('inventory', context, {
+                    restaurant_id: context.restaurantId,
+                    name: payload.name,
+                    price: payload.price,
+                    category: payload.category
+                })
+            ];
 
-            if (id) {
-                return supabase.from('inventory').update(record).eq('id', id);
-            }
+            const mutate = (record) => {
+                if (id) {
+                    return supabase.from('inventory').update(record).eq('id', id);
+                }
+                return supabase.from('inventory').insert([record]);
+            };
 
-            return supabase.from('inventory').insert([record]);
+            return runMutationAttempts(mutate, attempts, [
+                { tableName: 'inventory', columnName: 'is_measured_sale' },
+                { tableName: 'inventory', columnName: 'measured_sale_unit_size' },
+                { tableName: 'inventory', columnName: 'measured_sale_unit_label' }
+            ]);
         },
 
         async importProducts(context, batch, existingProducts = []) {
@@ -829,23 +864,46 @@ export function createRepositories(supabase) {
             for (const row of batch) {
                 const key = String(row.name || '').trim().toLowerCase();
                 const existing = byName.get(key);
-                const record = attachBranchPayload('inventory', context, {
-                    restaurant_id: row.restaurant_id || context.restaurantId,
-                    name: row.name,
-                    price: row.price,
-                    category: row.category
-                });
+                const attempts = [
+                    attachBranchPayload('inventory', context, {
+                        restaurant_id: row.restaurant_id || context.restaurantId,
+                        name: row.name,
+                        price: row.price,
+                        category: row.category,
+                        is_measured_sale: row.is_measured_sale,
+                        measured_sale_unit_size: row.measured_sale_unit_size,
+                        measured_sale_unit_label: row.measured_sale_unit_label
+                    }),
+                    attachBranchPayload('inventory', context, {
+                        restaurant_id: row.restaurant_id || context.restaurantId,
+                        name: row.name,
+                        price: row.price,
+                        category: row.category
+                    })
+                ];
 
-                let response;
-                if (existing?.product_id || existing?.id) {
-                    response = await supabase
-                        .from('inventory')
-                        .update(record)
-                        .eq('id', existing.product_id || existing.id);
-                } else {
-                    response = await supabase
-                        .from('inventory')
-                        .insert([record]);
+                let response = null;
+                for (const record of attempts) {
+                    if (response && !response.error) break;
+                    if (existing?.product_id || existing?.id) {
+                        response = await supabase
+                            .from('inventory')
+                            .update(record)
+                            .eq('id', existing.product_id || existing.id);
+                    } else {
+                        response = await supabase
+                            .from('inventory')
+                            .insert([record]);
+                    }
+
+                    if (
+                        response.error &&
+                        !isMissingColumnError(response.error, 'inventory', 'is_measured_sale') &&
+                        !isMissingColumnError(response.error, 'inventory', 'measured_sale_unit_size') &&
+                        !isMissingColumnError(response.error, 'inventory', 'measured_sale_unit_label')
+                    ) {
+                        return response;
+                    }
                 }
 
                 if (response.error) {

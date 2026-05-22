@@ -1865,6 +1865,12 @@ function normalizeProductImportRows(rows, restaurantIdOverride = '') {
         const rawPrice = row.price ?? row.sale_price ?? '';
         const price = rawPrice === '' ? 0 : Number(rawPrice);
         const restaurantId = (row.restaurant_id || restaurantIdOverride || state.restaurantId || '').trim();
+        const rawMeasuredFlag = String(row.is_measured_sale ?? row.measured_sale ?? '').trim().toLowerCase();
+        const isMeasuredSale = rawMeasuredFlag === 'true' || rawMeasuredFlag === 'yes' || rawMeasuredFlag === '1';
+        const measuredSaleUnitSize = row.measured_sale_unit_size === '' || row.measured_sale_unit_size === undefined || row.measured_sale_unit_size === null
+            ? null
+            : Number(row.measured_sale_unit_size);
+        const measuredSaleUnitLabel = String(row.measured_sale_unit_label || '').trim();
 
         if (!name) {
             throw new Error(`Row ${row.__rowNumber}: item_name or name is required.`);
@@ -1878,12 +1884,21 @@ function normalizeProductImportRows(rows, restaurantIdOverride = '') {
         if (!restaurantId) {
             throw new Error(`Row ${row.__rowNumber}: restaurant_id is required.`);
         }
+        if (isMeasuredSale && (!Number.isFinite(measuredSaleUnitSize) || measuredSaleUnitSize <= 0)) {
+            throw new Error(`Row ${row.__rowNumber}: measured_sale_unit_size must be greater than 0 for measured sale items.`);
+        }
+        if (isMeasuredSale && !measuredSaleUnitLabel) {
+            throw new Error(`Row ${row.__rowNumber}: measured_sale_unit_label is required for measured sale items.`);
+        }
 
         return {
             name,
             category,
             price,
-            restaurant_id: restaurantId
+            restaurant_id: restaurantId,
+            is_measured_sale: isMeasuredSale,
+            measured_sale_unit_size: isMeasuredSale ? measuredSaleUnitSize : null,
+            measured_sale_unit_label: isMeasuredSale ? measuredSaleUnitLabel : null
         };
     });
 }
@@ -2504,6 +2519,47 @@ function usesDirectStockMath(item) {
     return String(item?.sale_mode || '').toLowerCase() === 'direct';
 }
 
+function isMeasuredSaleItem(item) {
+    return item?.is_measured_sale === true && toNumber(item?.measured_sale_unit_size) > 0;
+}
+
+function getMeasuredSaleUnitSize(item) {
+    return Math.max(toNumber(item?.measured_sale_unit_size), 0);
+}
+
+function getMeasuredSaleUnitLabel(item) {
+    return String(item?.measured_sale_unit_label || '').trim() || 'Sale Units';
+}
+
+function convertStockQtyToSaleQty(item, stockQty) {
+    if (!isMeasuredSaleItem(item)) return Math.max(0, toNumber(stockQty));
+    const unitSize = getMeasuredSaleUnitSize(item);
+    if (unitSize <= 0) return 0;
+    return Math.max(0, toNumber(stockQty)) / unitSize;
+}
+
+function getSalesOpeningDisplay(item) {
+    return formatQuantity(item?.bbf || 0);
+}
+
+function getSalesAddedDisplay(item) {
+    return formatQuantity(item?.added_today || 0);
+}
+
+function getSalesSoldDisplay(item, soldQty) {
+    if (isMeasuredSaleItem(item)) {
+        return `${formatQuantity(soldQty)} ${getMeasuredSaleUnitLabel(item)}`.trim();
+    }
+    return formatQuantity(soldQty);
+}
+
+function toggleMeasuredSaleFields() {
+    const wrap = document.getElementById('measuredSaleFields');
+    const checkbox = document.getElementById('pMeasuredSale');
+    if (!wrap || !checkbox) return;
+    wrap.classList.toggle('hidden', !checkbox.checked);
+}
+
 function isRestaurantKeyStoreCheckEnabled() {
     return !isDirectSalesMode();
 }
@@ -2711,6 +2767,9 @@ async function loadInventory(options = {}) {
             name: product.name,
             price: toNumber(product.price),
             category: product.category || '',
+            is_measured_sale: product.is_measured_sale === true,
+            measured_sale_unit_size: toNumber(product.measured_sale_unit_size),
+            measured_sale_unit_label: String(product.measured_sale_unit_label || '').trim(),
             added_today: addedQty,
             bbf: openingQty,
             sold: 0,
@@ -3412,15 +3471,16 @@ function recalculateSalesTotals() {
                 producedQty: input.dataset.producedQty,
                 closingQty: safeValue
             });
-        const amount = soldQty * toNumber(item?.price);
+        const saleQty = convertStockQtyToSaleQty(item, soldQty);
+        const amount = saleQty * toNumber(item?.price);
 
         const soldCell = document.getElementById(`sold_${productId}`);
         const amtCell = document.getElementById(`amt_${productId}`);
-        if (soldCell) soldCell.innerText = formatQuantity(soldQty);
+        if (soldCell) soldCell.innerText = getSalesSoldDisplay(item, saleQty);
         if (amtCell) amtCell.innerText = amount.toLocaleString();
 
         if (item) {
-            item.sold = hasEntry ? soldQty : 0;
+            item.sold = hasEntry ? saleQty : 0;
             item.closing_stock = hasEntry ? safeValue : null;
         }
 
@@ -3478,16 +3538,19 @@ function renderSales() {
           return `
               ${sectionMarkup}
               <tr>
-                  <td style="padding:6px 14px; font-weight:500;">${getDisplayProductName(item.name)}</td>
+                  <td style="padding:6px 14px; font-weight:500;">
+                      <div>${getDisplayProductName(item.name)}</div>
+                      ${isMeasuredSaleItem(item) ? `<div style="font-size:11px; color:#64748b;">Balance in L, sold as ${escapeHtml(getMeasuredSaleUnitLabel(item))}</div>` : ''}
+                  </td>
                   <td style="text-align:left;">
                       <span style="display:inline-flex; align-items:center; min-width:48px; padding:0; color:#1d4ed8; font-weight:700;">
-                          ${usesDirectMath ? formatQuantity(item.bbf) : item.bbf}
+                          ${usesDirectMath ? getSalesOpeningDisplay(item) : item.bbf}
                       </span>
                   </td>
                   <td style="text-align:left;">
                       ${usesDirectMath ? `
                           <span style="display:inline-flex; align-items:center; min-width:48px; padding:0; color:#047857; font-weight:700;">
-                              ${formatQuantity(item.added_today)}
+                              ${getSalesAddedDisplay(item)}
                           </span>
                       ` : `
                           <span style="display:inline-flex; align-items:center; min-width:48px; padding:0; color:#047857; font-weight:700;">
@@ -3513,7 +3576,7 @@ function renderSales() {
                         value="${explicitValue}"
                         style="display:block; width:120px; padding:6px; border:1px solid #7092ae; border-radius:4px; margin:0;">
                 </td>
-                <td id="sold_${item.product_id}" style="font-weight:bold; text-align:left; color: #2c3e50;">${formatQuantity(item.sold || 0)}</td>
+                <td id="sold_${item.product_id}" style="font-weight:bold; text-align:left; color: #2c3e50;">${getSalesSoldDisplay(item, item.sold || 0)}</td>
                 <td style="font-weight:600; text-align:left; color:#2c3e50;">${formatMoney(item.price || 0)}</td>
                 <td id="amt_${item.product_id}" class="row-amt" style="font-weight:bold; text-align:left;">0</td>
             </tr>
@@ -4537,6 +4600,8 @@ function collectClosingRows() {
             const addedQty = toNumber(input.dataset.producedQty);
             const issuedQty = toNumber(input.dataset.issuedQty);
             const closingQty = rawValue === '' ? 0 : clampClosingQty(rawValue, toNumber(input.dataset.maxQty));
+            const soldStockQty = Math.max(0, openingQty + addedQty - issuedQty - closingQty);
+            const soldQty = convertStockQtyToSaleQty(item, soldStockQty);
             return {
                 shiftRowId: input.dataset.shiftRowId,
                 productId: input.dataset.productId,
@@ -4550,9 +4615,9 @@ function collectClosingRows() {
                 spoiltQty: 0,
                 closingQty,
                 saleMode: item?.sale_mode || 'full',
-                soldQty: Math.max(0, openingQty + addedQty - issuedQty - closingQty),
+                soldQty,
                 unitPrice: toNumber(item?.price),
-                lineTotal: Math.max(0, openingQty + addedQty - issuedQty - closingQty) * toNumber(item?.price)
+                lineTotal: soldQty * toNumber(item?.price)
             };
         });
 
@@ -4571,9 +4636,15 @@ function collectClosingRows() {
                 spoiltQty: 0,
                 closingQty: 0,
                 saleMode: item?.sale_mode || 'full',
-                soldQty: Math.max(0, toNumber(item.bbf) + toNumber(item.added_today) - toNumber(item.issued_qty)),
+                soldQty: convertStockQtyToSaleQty(
+                    item,
+                    Math.max(0, toNumber(item.bbf) + toNumber(item.added_today) - toNumber(item.issued_qty))
+                ),
                 unitPrice: toNumber(item?.price),
-                lineTotal: Math.max(0, toNumber(item.bbf) + toNumber(item.added_today) - toNumber(item.issued_qty)) * toNumber(item?.price)
+                lineTotal: convertStockQtyToSaleQty(
+                    item,
+                    Math.max(0, toNumber(item.bbf) + toNumber(item.added_today) - toNumber(item.issued_qty))
+                ) * toNumber(item?.price)
             }));
 
         return [...visibleRows, ...hiddenZeroRows];
@@ -4596,6 +4667,7 @@ function collectClosingRows() {
                 producedQty: input.dataset.producedQty,
                 closingQty: input.value
             });
+        const saleQty = convertStockQtyToSaleQty(item, soldQty);
         return {
             shiftRowId: input.dataset.shiftRowId,
             productId: input.dataset.productId,
@@ -4609,9 +4681,9 @@ function collectClosingRows() {
             spoiltQty: toNumber(item?.spoilt),
             closingQty: toNumber(input.value),
             saleMode,
-            soldQty,
+            soldQty: saleQty,
             unitPrice: toNumber(item?.price),
-            lineTotal: soldQty * toNumber(item?.price)
+            lineTotal: saleQty * toNumber(item?.price)
         };
     });
 
@@ -5512,6 +5584,10 @@ window.editSellingProduct = (id) => {
     document.getElementById('productId').value = item.product_id;
     document.getElementById('pName').value = item.name || '';
     document.getElementById('pPrice').value = item.price || '';
+    document.getElementById('pMeasuredSale').checked = item.is_measured_sale === true;
+    document.getElementById('pMeasuredSaleUnitSize').value = item.measured_sale_unit_size || '';
+    document.getElementById('pMeasuredSaleUnitLabel').value = item.measured_sale_unit_label || '';
+    toggleMeasuredSaleFields();
     refreshFinishedProductCategoryOptions(item.category || getDefaultRecipeCategory());
     document.getElementById('prodFormTitle').innerText = 'Edit Selling Item';
     document.getElementById('cancelProdBtn').style.display = 'inline-block';
@@ -5523,6 +5599,10 @@ window.resetProductForm = () => {
     document.getElementById('productId').value = '';
     document.getElementById('pName').value = '';
     document.getElementById('pPrice').value = '';
+    document.getElementById('pMeasuredSale').checked = false;
+    document.getElementById('pMeasuredSaleUnitSize').value = '';
+    document.getElementById('pMeasuredSaleUnitLabel').value = '';
+    toggleMeasuredSaleFields();
     refreshFinishedProductCategoryOptions(getDefaultRecipeCategory());
     document.getElementById('prodFormTitle').innerText = 'Add New Selling Item';
     document.getElementById('cancelProdBtn').style.display = 'none';
@@ -5563,9 +5643,23 @@ window.saveSellingProduct = async () => {
         const name = document.getElementById('pName').value.trim();
         const price = toNumber(document.getElementById('pPrice').value);
         const category = document.getElementById('pCat').value;
+        const isMeasuredSale = document.getElementById('pMeasuredSale').checked;
+        const measuredSaleUnitSize = toNumber(document.getElementById('pMeasuredSaleUnitSize').value);
+        const measuredSaleUnitLabel = String(document.getElementById('pMeasuredSaleUnitLabel').value || '').trim();
         if (!name || price <= 0) throw new Error('Please enter a valid name and price.');
+        if (isMeasuredSale) {
+            if (measuredSaleUnitSize <= 0) throw new Error('Enter a valid sale unit size in litres for the measured sale item.');
+            if (!measuredSaleUnitLabel) throw new Error('Enter a sale unit label for the measured sale item.');
+        }
 
-        const { error } = await repositories.saveProduct(getScope(), { name, price, category }, id);
+        const { error } = await repositories.saveProduct(getScope(), {
+            name,
+            price,
+            category,
+            isMeasuredSale,
+            measuredSaleUnitSize: isMeasuredSale ? measuredSaleUnitSize : null,
+            measuredSaleUnitLabel: isMeasuredSale ? measuredSaleUnitLabel : null
+        }, id);
         if (error) throw error;
 
         clearReferenceDataCaches();
@@ -6735,6 +6829,7 @@ window.showPage = async (id) => {
   };
 
 window.updateDropdowns = updateDropdowns;
+window.toggleMeasuredSaleFields = toggleMeasuredSaleFields;
 window.filterOperationManual = () => {
     const query = document.getElementById('manualSearch')?.value || '';
     renderOperationManual(query);

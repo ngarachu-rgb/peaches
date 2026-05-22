@@ -575,23 +575,42 @@
         
         <div id="finishedProductsFormCard" style="background: #f0fdf4; padding: 20px; border-radius: 8px; margin-bottom: 30px;">
             <h4 id="prodFormTitle" style="margin-top:0;">Add New Sales Item</h4>
-            <input type="hidden" id="productId"> 
+            <input type="hidden" id="productId" name="productId"> 
             <div class="recon-grid">
                 <div>
                     <label style="font-size: 12px; color: #666;">Item Name</label>
-                    <input type="text" id="pName" placeholder="e.g. Samosa">
+                    <input type="text" id="pName" name="pName" placeholder="e.g. Samosa">
                 </div>
                 <div>
                     <label style="font-size: 12px; color: #666;">Selling Price</label>
-                    <input type="number" id="pPrice" placeholder="0.00">
+                    <input type="number" id="pPrice" name="pPrice" placeholder="0.00">
                 </div>
                 <div>
                     <label style="font-size: 12px; color: #666;">Category</label>
-                    <select id="pCat">
+                    <select id="pCat" name="pCat">
                         <option value="Food">Food</option>
                         <option value="Drinks">Drinks</option>
                         <option value="Snacks">Snacks</option>
                     </select>
+                </div>
+                <div style="display:flex; align-items:flex-end;">
+                    <label style="display:flex; align-items:center; gap:8px; margin:0;">
+                        <input type="checkbox" id="pMeasuredSale" name="pMeasuredSale" onchange="toggleMeasuredSaleFields()">
+                        <span>Measured Sale Item</span>
+                    </label>
+                </div>
+                <div id="measuredSaleFields" class="hidden" style="grid-column:1 / -1;">
+                    <div class="recon-grid" style="margin-top:0;">
+                        <div>
+                            <label style="font-size:12px; color:#666;">Sale Unit Size In Litres</label>
+                            <input type="number" id="pMeasuredSaleUnitSize" name="pMeasuredSaleUnitSize" min="0" step="0.01" placeholder="e.g. 0.25">
+                        </div>
+                        <div>
+                            <label style="font-size:12px; color:#666;">Sale Unit Label</label>
+                            <input type="text" id="pMeasuredSaleUnitLabel" name="pMeasuredSaleUnitLabel" placeholder="e.g. 250ML Cup">
+                        </div>
+                    </div>
+                    <div style="margin-top:8px; font-size:12px; color:#64748b;">Use this for drinks received and balanced in litres but sold in cups. Example: 0.25 litres per 250ML cup.</div>
                 </div>
                 <div style="display: flex; align-items: flex-end; gap: 10px;">
                     <button class="btn btn-success" id="saveProdBtn" onclick="saveSellingProduct()" style="flex:1;">Save Product</button>
