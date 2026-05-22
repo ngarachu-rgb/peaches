@@ -2146,10 +2146,14 @@ function renderAuditReportPreview(report) {
           <div style="font-weight:700; color:#2c3e50; margin-bottom:10px;">${report.title}</div>
           ${summaryMarkup}
           ${noteMarkup}
-          <table style="width:100%; border-collapse:collapse;">
+          <table style="width:100%; border-collapse:collapse; table-layout:${report.tableLayout || 'auto'};">
               <thead>
                 <tr>
-                    ${report.columns.map((column) => `<th style="padding:12px; background:#f8fafc; color:#7092ae;">${column.label}</th>`).join('')}
+                    ${report.columns.map((column) => {
+                        const align = column.align || 'left';
+                        const width = column.width ? `width:${column.width};` : '';
+                        return `<th style="padding:12px; background:#f8fafc; color:#7092ae; text-align:${align}; ${width}">${column.label}</th>`;
+                    }).join('')}
                 </tr>
               </thead>
               <tbody>
@@ -2164,10 +2168,12 @@ function renderAuditReportPreview(report) {
                       return `
                       <tr style="${rowStyle}">
                           ${report.columns.map((column) => {
-                              const varianceStyle = column.key === 'variance'
+                              const varianceStyle = column.key === 'variance' || column.key === 'diff'
                                   ? getVarianceDisplayStyle(row[column.key])
                                   : '';
-                              return `<td style="${cellStyle}${varianceStyle}">${row[column.key] ?? ''}</td>`;
+                              const align = column.align || 'left';
+                              const extraStyle = column.cellStyle || '';
+                              return `<td style="${cellStyle}text-align:${align}; ${extraStyle}${varianceStyle}">${row[column.key] ?? ''}</td>`;
                           }).join('')}
                       </tr>
                   `;
@@ -7435,6 +7441,78 @@ function buildRawItemsReceivedReport(data) {
     };
 }
 
+function buildRawMaterialBalancesReport(data) {
+    const showBranch = isAllBranchesReportScope();
+    const rows = (data.rawMaterials || [])
+        .map((material) => {
+            const currentStock = toNumber(material.stock_level ?? material.current_stock);
+            const reorderLevel = material.reorder_level === null || material.reorder_level === undefined || material.reorder_level === ''
+                ? '--'
+                : `${roundDisplayQuantityUp(material.reorder_level)} ${material.store_unit || ''}`.trim();
+            const latestBuyPrice = toNumber(material.price);
+            const estimatedValue = currentStock * latestBuyPrice;
+            const status = getStoreStockStatus(material);
+
+            return {
+                ...(showBranch ? { branch: getBranchName(material.branch_id) } : {}),
+                item: getDisplayMaterialName(material.name),
+                buy_unit: material.buy_unit || '--',
+                store_unit: material.store_unit || '--',
+                conversion: formatQuantity(Math.max(toNumber(material.conversion_factor), 1), 4),
+                current_stock: `${roundDisplayQuantityUp(currentStock)} ${material.store_unit || ''}`.trim(),
+                reorder_level: reorderLevel,
+                latest_buy_price: formatMoney(latestBuyPrice),
+                estimated_value: formatMoney(estimatedValue),
+                status: status.label,
+                _currentStock: currentStock,
+                _estimatedValue: estimatedValue,
+                _statusRank: currentStock <= 0 ? 0 : (status.label === 'Low Stock' ? 1 : 2)
+            };
+        })
+        .sort((left, right) => {
+            if (showBranch) {
+                const branchCompare = String(left.branch || '').localeCompare(String(right.branch || ''), undefined, { sensitivity: 'base' });
+                if (branchCompare !== 0) return branchCompare;
+            }
+
+            if (left._statusRank !== right._statusRank) return left._statusRank - right._statusRank;
+            return left.item.localeCompare(right.item, undefined, { sensitivity: 'base' });
+        });
+
+    const totalEstimatedValue = rows.reduce((sum, row) => sum + toNumber(row._estimatedValue), 0);
+    const lowOrOutCount = rows.filter((row) => row._currentStock <= 0 || row.status === 'Low Stock').length;
+
+    return {
+        title: 'Raw Material Stock Balances',
+        summary: [
+            { label: 'Items', value: String(rows.length) },
+            { label: 'Low / Out Of Stock', value: String(lowOrOutCount) },
+            { label: 'Estimated Stock Value', value: `KES ${formatMoney(totalEstimatedValue)}` }
+        ],
+        columns: [
+            ...(showBranch ? [{ key: 'branch', label: 'Branch' }] : []),
+            { key: 'item', label: 'Item' },
+            { key: 'buy_unit', label: 'Buy Unit' },
+            { key: 'store_unit', label: 'Store Unit' },
+            { key: 'conversion', label: 'Conversion' },
+            { key: 'current_stock', label: 'Current Balance' },
+            { key: 'reorder_level', label: 'Reorder Level' },
+            { key: 'latest_buy_price', label: 'Latest Buy Price' },
+            { key: 'estimated_value', label: 'Estimated Stock Value' },
+            { key: 'status', label: 'Status' }
+        ],
+        rows: rows.map((row) => {
+            const { _currentStock, _estimatedValue, _statusRank, ...displayRow } = row;
+            return displayRow;
+        }),
+        notes: [
+            'This is a live raw material stock snapshot for the selected branch scope.',
+            'It shows current balances of procured raw items from main store and does not depend on the chosen date range.',
+            'Estimated Stock Value uses the latest stored buy price multiplied by current balance.'
+        ]
+    };
+}
+
 function buildOperatingSuppliesReport(data) {
     const showBranch = isAllBranchesReportScope();
     const totalSupplyCost = (data.supplyReceipts || []).reduce((sum, row) => sum + toNumber(row.total_received_cost), 0);
@@ -8109,36 +8187,146 @@ function buildKitchenVsSalesReport(data) {
 }
 
 function buildProfitLossReport(data) {
+    const grouped = new Map();
+    const getOrCreateRow = (label) => {
+        const key = String(label || '').trim().toLowerCase();
+        const existing = grouped.get(key);
+        if (existing) return existing;
+
+        const created = {
+            item: label,
+            qtyBought: 0,
+            totalCost: 0,
+            qtySold: 0,
+            totalSale: 0,
+            diff: 0,
+            linkedProduct: null,
+            rowType: 'item'
+        };
+        grouped.set(key, created);
+        return created;
+    };
+
     const totalSales = (data.shifts || []).reduce((sum, shift) => sum + toNumber(shift.total_sales), 0);
     const itemsReceivedCost = (data.stockReceipts || []).reduce((sum, row) => sum + toNumber(row.total_received_cost), 0);
     const suppliesReceivedCost = (data.supplyReceipts || []).reduce((sum, row) => sum + toNumber(row.total_received_cost), 0);
     const expenses = (data.expenses || []).reduce((sum, row) => sum + toNumber(row.amount), 0);
     const totalSpend = itemsReceivedCost + suppliesReceivedCost + expenses;
     const profitLoss = totalSales - totalSpend;
+    const productMap = new Map((data.products || []).map((product) => [String(product.id), product]));
+    const productByNameMap = new Map((data.products || []).map((product) => [
+        String(product.name || '').trim().toLowerCase(),
+        product
+    ]));
+
+    (data.stockReceipts || []).forEach((row) => {
+        const item = getDisplayMaterialName(row.material_name || 'Stock Item');
+        const entry = getOrCreateRow(item);
+        entry.qtyBought += toNumber(row.qty_received);
+        entry.totalCost += toNumber(row.total_received_cost);
+        if (!entry.linkedProduct) {
+            entry.linkedProduct = productByNameMap.get(String(item).trim().toLowerCase()) || null;
+        }
+    });
+
+    (data.supplyReceipts || []).forEach((row) => {
+        const item = String(row.item_name || 'Supply Item').trim() || 'Supply Item';
+        const entry = getOrCreateRow(item);
+        entry.qtyBought += toNumber(row.qty_received);
+        entry.totalCost += toNumber(row.total_received_cost);
+        if (!entry.linkedProduct) {
+            entry.linkedProduct = productByNameMap.get(String(item).trim().toLowerCase()) || null;
+        }
+    });
+
+    (data.expenses || []).forEach((row) => {
+        const label = `Expense: ${String(row.description || 'General Expense').trim() || 'General Expense'}`;
+        const entry = getOrCreateRow(label);
+        entry.qtyBought += toNumber(row.qty);
+        entry.totalCost += toNumber(row.amount);
+        entry.rowType = 'expense';
+    });
+
+    (data.shiftInventory || []).forEach((row) => {
+        const product = productMap.get(String(row.product_id));
+        if (!product) return;
+
+        const soldQty = toNumber(row.sold_qty);
+        if (soldQty <= 0) return;
+
+        const entry = getOrCreateRow(getDisplayProductName(product.name));
+        entry.qtySold += soldQty;
+        entry.totalSale += soldQty * toNumber(product.price);
+        entry.linkedProduct = product;
+    });
+
+    const detailRows = [...grouped.values()]
+        .map((row) => ({
+            ...row,
+            diff: row.totalSale - row.totalCost
+        }))
+        .sort((left, right) => {
+            const leftHasProduct = Boolean(left.linkedProduct);
+            const rightHasProduct = Boolean(right.linkedProduct);
+            if (leftHasProduct && rightHasProduct) {
+                return compareSalesItems(left.linkedProduct, right.linkedProduct);
+            }
+            if (leftHasProduct !== rightHasProduct) {
+                return leftHasProduct ? -1 : 1;
+            }
+
+            if (left.rowType !== right.rowType) {
+                if (left.rowType === 'expense') return 1;
+                if (right.rowType === 'expense') return -1;
+            }
+
+            return String(left.item || '').localeCompare(String(right.item || ''), undefined, { sensitivity: 'base' });
+        });
+
+    const totalQtyBought = detailRows.reduce((sum, row) => sum + row.qtyBought, 0);
+    const totalQtySold = detailRows.reduce((sum, row) => sum + row.qtySold, 0);
 
     return {
         title: 'Estimated Profit / Loss',
         summary: [
             { label: 'Total Sales', value: `KES ${formatMoney(totalSales)}` },
-            { label: 'Total Spend', value: `KES ${formatMoney(totalSpend)}` },
+            { label: 'Items Received Cost', value: `KES ${formatMoney(itemsReceivedCost)}` },
+            { label: 'Supplies Received Cost', value: `KES ${formatMoney(suppliesReceivedCost)}` },
             { label: 'Expenses', value: `KES ${formatMoney(expenses)}` },
+            { label: 'Total Spend', value: `KES ${formatMoney(totalSpend)}` },
             { label: 'Profit / Loss', value: `KES ${formatMoney(profitLoss)}`, style: getVarianceDisplayStyle(profitLoss) }
         ],
         columns: [
-            { key: 'metric', label: 'Metric' },
-            { key: 'value', label: 'Value' }
+            { key: 'item', label: 'Item', width: '34%' },
+            { key: 'qty_bought', label: 'Qty Bought', align: 'right', width: '12%' },
+            { key: 'total_cost', label: 'Total Cost', align: 'right', width: '14%' },
+            { key: 'qty_sold', label: 'Qty Sold', align: 'right', width: '12%' },
+            { key: 'total_sale', label: 'Total Sale', align: 'right', width: '14%' },
+            { key: 'diff', label: 'Diff', align: 'right', width: '14%' }
         ],
+        tableLayout: 'fixed',
         rows: [
-            { metric: 'Total Sales', value: totalSales.toLocaleString() },
-            { metric: 'Items Received Cost', value: itemsReceivedCost.toLocaleString() },
-            { metric: 'Supplies Received Cost', value: suppliesReceivedCost.toLocaleString() },
-            { metric: 'Expenses', value: expenses.toLocaleString() },
-            { metric: 'Total Spend', value: totalSpend.toLocaleString() },
-            { metric: 'Profit / Loss', value: profitLoss.toLocaleString() }
+            ...detailRows.map((row) => ({
+                item: row.item,
+                qty_bought: formatQuantity(row.qtyBought, 4),
+                total_cost: row.totalCost.toLocaleString(),
+                qty_sold: formatQuantity(row.qtySold, 4),
+                total_sale: row.totalSale.toLocaleString(),
+                diff: row.diff.toLocaleString()
+            })),
+            {
+                item: 'TOTAL',
+                qty_bought: formatQuantity(totalQtyBought, 4),
+                total_cost: totalSpend.toLocaleString(),
+                qty_sold: formatQuantity(totalQtySold, 4),
+                total_sale: totalSales.toLocaleString(),
+                diff: profitLoss.toLocaleString()
+            }
         ],
         notes: [
             'This report uses Total Sales minus Total Spend for the selected period.',
             'Total Spend is calculated as stock item receipts plus supplies received plus recorded expense rows.',
+            'Expense rows are shown as spend-only lines with zero sales so the detail table still reconciles to the summary.',
             'Loss appears as a negative figure and profit appears as a positive figure.'
         ]
     };
@@ -8148,6 +8336,8 @@ function buildAuditReport(reportType, data) {
     switch (reportType) {
     case 'raw-items-received':
         return buildRawItemsReceivedReport(data);
+    case 'raw-material-balances':
+        return buildRawMaterialBalancesReport(data);
     case 'operating-supplies':
         return buildOperatingSuppliesReport(data);
     case 'out-of-stock':
