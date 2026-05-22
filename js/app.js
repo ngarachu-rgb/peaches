@@ -284,6 +284,13 @@ function formatQuantity(value, maximumFractionDigits = 2) {
     });
 }
 
+function formatFixedQuantity(value, fractionDigits = 2) {
+    return toNumber(value).toLocaleString(undefined, {
+        minimumFractionDigits: fractionDigits,
+        maximumFractionDigits: fractionDigits
+    });
+}
+
 function getShiftDraftStorageKey({
     restaurantId = state.restaurantId,
     branchId = state.branchId,
@@ -2539,10 +2546,16 @@ function convertStockQtyToSaleQty(item, stockQty) {
 }
 
 function getSalesOpeningDisplay(item) {
+    if (isMeasuredSaleItem(item)) {
+        return formatFixedQuantity(item?.bbf || 0, 2);
+    }
     return formatQuantity(item?.bbf || 0);
 }
 
 function getSalesAddedDisplay(item) {
+    if (isMeasuredSaleItem(item)) {
+        return formatFixedQuantity(item?.added_today || 0, 2);
+    }
     return formatQuantity(item?.added_today || 0);
 }
 
