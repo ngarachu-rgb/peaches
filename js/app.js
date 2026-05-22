@@ -3468,7 +3468,7 @@ function recalculateSalesTotals() {
         const rawValue = String(input.value ?? '').trim();
         const hasEntry = rawValue !== '';
         const safeValue = hasEntry ? clampClosingQty(rawValue, maxQty) : 0;
-        if (hasEntry && String(input.value) !== String(safeValue)) {
+        if (hasEntry && !isMeasuredSaleItem(item) && String(input.value) !== String(safeValue)) {
             input.value = safeValue;
         }
         const soldQty = usesDirectMath
@@ -5115,7 +5115,9 @@ window.calcSalesRow = (element) => {
     }
 
     const safeValue = clampClosingQty(rawValue, maxQty);
-    element.value = safeValue;
+    if (!isMeasuredSaleItem(item)) {
+        element.value = safeValue;
+    }
     if (item && !usesDirectStockMath(item)) item.closing_stock = safeValue;
     state.salesDrafts[String(element.dataset.productId)] = safeValue;
     recalculateSalesTotals();
