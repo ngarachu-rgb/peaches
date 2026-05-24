@@ -988,16 +988,30 @@
         <div class="card">
             <div style="display:flex; gap:10px; flex-wrap:wrap;">
                 <button id="stocksViewReceiptsBtn" class="btn" type="button" onclick="switchStocksView('receipts')" style="background:#7092ae; color:white;">Receive Items</button>
-                <button id="stocksViewSuppliesBtn" class="btn" type="button" onclick="switchStocksView('supplies')" style="background:#edf2f7; color:#2d3748;">Receive Supplies</button>
-                <button id="stocksViewLevelsBtn" class="btn" type="button" onclick="switchStocksView('levels')" style="background:#edf2f7; color:#2d3748;">Stock Levels</button>
+                <button id="stocksViewLevelsBtn" class="btn" type="button" onclick="switchStocksView('levels')" style="background:#edf2f7; color:#2d3748;">Raw Stock Levels</button>
+                <button id="stocksViewSupplyLevelsBtn" class="btn" type="button" onclick="switchStocksView('supplyLevels')" style="background:#edf2f7; color:#2d3748;">Supplies Levels</button>
                 <button id="stocksViewIssuesBtn" class="btn hidden" type="button" onclick="switchStocksView('issues')" style="background:#edf2f7; color:#2d3748;">Issue To Shots</button>
-                <button id="stocksViewTransfersBtn" class="btn" type="button" onclick="switchStocksView('transfers')" style="background:#edf2f7; color:#2d3748;">Transfers</button>
+                <button id="stocksViewSupplyIssuesBtn" class="btn" type="button" onclick="switchStocksView('supplyIssues')" style="background:#edf2f7; color:#2d3748;">Supplies Issue Out</button>
+                <button id="stocksViewTransfersBtn" class="btn" type="button" onclick="switchStocksView('transfers')" style="background:#edf2f7; color:#2d3748;">Transfer Items</button>
             </div>
         </div>
 
         <div id="stocksReceiptsView">
         <div class="card">
-            <h2>Receive Items</h2>
+            <div style="display:flex; justify-content:space-between; align-items:flex-end; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
+                <div>
+                    <h2 style="margin:0;">Receive Items</h2>
+                    <div style="color:#64748b; font-size:14px; margin-top:4px;">Select a category first, then record either raw item receipts or supply receipts into branch stock.</div>
+                </div>
+                <div>
+                    <label for="stockReceiptCategory" style="display:block; font-size:15px; font-weight:700; color:#475569; margin-bottom:6px; text-transform:uppercase;">Category</label>
+                    <select id="stockReceiptCategory" name="stockReceiptCategory" onchange="setStockReceiptCategory(this.value)" style="background:#e5e7eb; font-size:16px; font-weight:700; color:#1f2937;">
+                        <option value="raw">Raw Items</option>
+                        <option value="supplies">Supplies</option>
+                    </select>
+                </div>
+            </div>
+            <div id="stockReceiptRawSection">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
                 <div style="color:#740515; font-size:18px;">Add one or more ITEM receipts, then post them together.</div>
                 <button class="btn" type="button" onclick="addStockReceiptLine()">Add Receipt Line</button>
@@ -1029,8 +1043,9 @@
             <div style="display: flex; justify-content: flex-end; margin-top: 16px;">
                 <button class="btn btn-success" onclick="processStockReceipt()">Record Receipts</button>
             </div>
+            </div>
         </div>
-        <div class="card">
+        <div id="stockReceiptRawHistory" class="card">
             <h3>Stock Receipt History</h3>
             <div id="stockReceiptHistoryTotal" style="margin:0 0 12px 0; text-align:right; font-weight:700; color:#274766;">Shift Received Total: KES 0.00</div>
             <table>
@@ -1058,7 +1073,19 @@
 
         <div id="stocksSuppliesView" class="hidden">
         <div class="card">
-            <h2>Receive Supplies</h2>
+            <div style="display:flex; justify-content:space-between; align-items:flex-end; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
+                <div>
+                    <h2 style="margin:0;">Receive Items</h2>
+                    <div style="color:#64748b; font-size:14px; margin-top:4px;">Select a category first, then record either raw item receipts or supply receipts into branch stock.</div>
+                </div>
+                <div>
+                    <label for="stockReceiptCategorySupplies" style="display:block; font-size:15px; font-weight:700; color:#475569; margin-bottom:6px; text-transform:uppercase;">Category</label>
+                    <select id="stockReceiptCategorySupplies" name="stockReceiptCategorySupplies" onchange="setStockReceiptCategory(this.value)" style="background:#e5e7eb; font-size:16px; font-weight:700; color:#1f2937;">
+                        <option value="raw">Raw Items</option>
+                        <option value="supplies" selected>Supplies</option>
+                    </select>
+                </div>
+            </div>
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; gap:12px; flex-wrap:wrap;">
                 <div style="color:#740515; font-size:18px;">Record operating supplies separately from raw materials. New items are accepted as you type.</div>
                 <button class="btn" type="button" onclick="addSupplyReceiptLine()">Add Supply Line</button>
@@ -1208,10 +1235,18 @@
             <div class="card">
                 <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap; margin-bottom:18px;">
                     <div>
-                        <h2 style="margin:0;">Branch Stock Transfer</h2>
-                        <div style="color:#64748b; font-size:13px; margin-top:4px;">Move raw materials from your current branch to another branch in the same restaurant. Quantities are recorded in store units.</div>
+                        <h2 style="margin:0;">Transfer Items</h2>
+                        <div style="color:#64748b; font-size:14px; margin-top:4px;">Select a category first, then move raw items or supplies from your current branch to another branch in the same restaurant.</div>
+                    </div>
+                    <div>
+                        <label for="stockTransferCategory" style="display:block; font-size:15px; font-weight:700; color:#475569; margin-bottom:6px; text-transform:uppercase;">Category</label>
+                        <select id="stockTransferCategory" name="stockTransferCategory" onchange="setStockTransferCategory(this.value)" style="background:#e5e7eb; font-size:16px; font-weight:700; color:#1f2937;">
+                            <option value="raw">Raw Items</option>
+                            <option value="supplies">Supplies</option>
+                        </select>
                     </div>
                 </div>
+                <div id="stocksTransferRawSection">
                 <div class="recon-grid" style="grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));">
                     <div>
                         <label for="stockTransferFromBranch" style="display:block; font-size:12px; color:#64748b; margin-bottom:6px; text-transform:uppercase;">Source Branch</label>
@@ -1250,11 +1285,54 @@
                     </table>
                 </div>
                 <div style="display:flex; justify-content:flex-end; margin-top:16px;">
-                    <button id="processStockTransferBtn" class="btn btn-success" type="button" onclick="processStockTransfer()">Transfer Stock</button>
+                    <button id="processStockTransferBtn" class="btn btn-success" type="button" onclick="processStockTransfer()">Transfer Items</button>
+                </div>
+                </div>
+                <div id="stocksTransferSupplySection" class="hidden">
+                    <div class="recon-grid" style="grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));">
+                        <div>
+                            <label for="supplyTransferFromBranch" style="display:block; font-size:12px; color:#64748b; margin-bottom:6px; text-transform:uppercase;">Source Branch</label>
+                            <div id="supplyTransferFromBranchLabel" style="padding:11px 12px; border:1px solid #cbd5e0; border-radius:6px; background:#f8fafc; font-weight:700;">--</div>
+                        </div>
+                        <div>
+                            <label for="supplyTransferToBranch" style="display:block; font-size:12px; color:#64748b; margin-bottom:6px; text-transform:uppercase;">Destination Branch</label>
+                            <select id="supplyTransferToBranch" name="supplyTransferToBranch" onchange="updateStockTransferDraft('toBranchId', this.value)"></select>
+                        </div>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-top:14px;">
+                        <div style="color:#64748b; font-size:13px;">Add one or more supply transfer lines, then post them together.</div>
+                        <button class="btn" type="button" onclick="addSupplyTransferLine()">Add Transfer Line</button>
+                    </div>
+                    <div style="overflow:auto; margin-top:14px;">
+                        <table style="display:table; width:100%; min-width:940px; table-layout:fixed; border:none;">
+                            <colgroup>
+                                <col style="width:28%;">
+                                <col style="width:12%;">
+                                <col style="width:18%;">
+                                <col style="width:12%;">
+                                <col style="width:20%;">
+                                <col style="width:10%;">
+                            </colgroup>
+                            <thead>
+                                <tr>
+                                    <th style="background:none; color:#7092ae;">Supply Item</th>
+                                    <th style="background:none; color:#7092ae;">Unit</th>
+                                    <th style="background:none; color:#7092ae;">Available</th>
+                                    <th style="background:none; color:#7092ae;">Quantity</th>
+                                    <th style="background:none; color:#7092ae;">Notes</th>
+                                    <th style="background:none; color:#7092ae; text-align:right;">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="supplyTransferBatchBody"></tbody>
+                        </table>
+                    </div>
+                    <div style="display:flex; justify-content:flex-end; margin-top:16px;">
+                        <button id="processSupplyTransferBtn" class="btn btn-success" type="button" onclick="processStockTransfer()">Transfer Supplies</button>
+                    </div>
                 </div>
             </div>
 
-            <div class="card">
+            <div id="stocksTransferRawHistory" class="card">
                 <h3>Transfer History</h3>
                 <table>
                     <thead>
@@ -1270,6 +1348,23 @@
                         </tr>
                     </thead>
                     <tbody id="stockTransfersBody"></tbody>
+                </table>
+            </div>
+            <div id="stocksTransferSupplyHistory" class="card hidden">
+                <h3>Supply Transfer History</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Item</th>
+                            <th>From</th>
+                            <th>To</th>
+                            <th>Qty</th>
+                            <th>Recorded By</th>
+                            <th>Notes</th>
+                        </tr>
+                    </thead>
+                    <tbody id="supplyTransfersBody"></tbody>
                 </table>
             </div>
         </div>
@@ -1558,6 +1653,93 @@
                 <div style="margin-top:15px;">
                     <button class="btn btn-primary" id="changePasswordBtn" onclick="changeMyPassword()">Update Password</button>
                 </div>
+            </div>
+        </div>
+
+        <div id="stocksSupplyIssuesView" class="hidden">
+            <div class="card">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap; margin-bottom:18px;">
+                    <div>
+                        <h2 style="margin:0;">Supplies Issue Out</h2>
+                        <div style="color:#64748b; font-size:13px; margin-top:4px;">Issue supplies from the branch supply store to operations, departments, or special use cases.</div>
+                    </div>
+                </div>
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-top:14px;">
+                    <div style="color:#64748b; font-size:13px;">Add one or more supply issue lines, then post them together.</div>
+                    <button class="btn" type="button" onclick="addSupplyIssueLine()">Add Issue Line</button>
+                </div>
+                <div style="overflow:auto; margin-top:14px;">
+                    <table style="display:table; width:100%; min-width:1080px; table-layout:fixed; border:none;">
+                        <colgroup>
+                            <col style="width:24%;">
+                            <col style="width:10%;">
+                            <col style="width:14%;">
+                            <col style="width:12%;">
+                            <col style="width:18%;">
+                            <col style="width:12%;">
+                            <col style="width:10%;">
+                        </colgroup>
+                        <thead>
+                            <tr>
+                                <th style="background:none; color:#7092ae;">Supply Item</th>
+                                <th style="background:none; color:#7092ae;">Unit</th>
+                                <th style="background:none; color:#7092ae;">Available</th>
+                                <th style="background:none; color:#7092ae;">Issue Qty</th>
+                                <th style="background:none; color:#7092ae;">Issued To / Purpose</th>
+                                <th style="background:none; color:#7092ae;">Notes</th>
+                                <th style="background:none; color:#7092ae; text-align:right;">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="supplyIssueBatchBody"></tbody>
+                    </table>
+                </div>
+                <div style="display:flex; justify-content:flex-end; margin-top:16px;">
+                    <button id="processSupplyIssueBtn" class="btn btn-success" onclick="processSupplyIssue()">Record Issue Out</button>
+                </div>
+            </div>
+            <div class="card">
+                <h3>Supply Issue History</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Item</th>
+                            <th>Qty</th>
+                            <th>Issued To</th>
+                            <th>Recorded By</th>
+                            <th>Notes</th>
+                        </tr>
+                    </thead>
+                    <tbody id="supplyIssueHistoryBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="stocksSupplyLevelsView" class="hidden">
+            <div class="card">
+                <div style="display:flex; justify-content:space-between; align-items:flex-end; gap:12px; flex-wrap:wrap; margin-bottom:16px;">
+                    <div>
+                        <h2 style="margin:0;">Current Supply Stock Levels</h2>
+                        <div style="color:#64748b; font-size:13px; margin-top:4px;">Monitor live balances for operating supplies held in the branch supply store.</div>
+                    </div>
+                    <div style="min-width:240px;">
+                        <input type="text" id="supplyLevelsSearch" name="supplyLevelsSearch" placeholder="Search supply item" oninput="renderSupplyLevelsView()">
+                    </div>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Item</th>
+                            <th>Category</th>
+                            <th>Unit</th>
+                            <th>Current Stock</th>
+                            <th>Reorder Level</th>
+                            <th>Latest Unit Cost</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="supplyStoreLevelsBody"></tbody>
+                </table>
             </div>
         </div>
     </div>

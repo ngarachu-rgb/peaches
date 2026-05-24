@@ -11,6 +11,7 @@ import {
 import { PAGE_PERMISSIONS, PERMISSIONS, ROLES, canSwitchBranches, hasPageAccess, hasPermission } from './permissions.js';
 import { createRepositories } from './repositories.js';
 import { adjustReverseDispatch, closeShiftWithCarryForward, ensureActiveShift, recordReverseDispatch } from './shift-service.js';
+import { issueSupplyStock, recordSupplyReceipt, transferSupplyStock } from './supply-store-service.js';
 import { transferRawMaterial } from './transfer-service.js';
 
 const repositories = createRepositories(supabase);
@@ -771,10 +772,29 @@ function createSupplyReceiptDraft() {
     };
 }
 
+function createSupplyIssueDraft() {
+    return {
+        supplyItemId: '',
+        itemSearch: '',
+        qty: '',
+        issuedTo: '',
+        notes: ''
+    };
+}
+
 function createStockTransferDraft() {
     return {
         materialId: '',
         materialSearch: '',
+        qty: '',
+        notes: ''
+    };
+}
+
+function createSupplyTransferDraft() {
+    return {
+        supplyItemId: '',
+        itemSearch: '',
         qty: '',
         notes: ''
     };
@@ -815,9 +835,21 @@ function ensureSupplyReceiptDrafts() {
     }
 }
 
+function ensureSupplyIssueDrafts() {
+    if (!Array.isArray(state.supplyIssueDrafts) || !state.supplyIssueDrafts.length) {
+        state.supplyIssueDrafts = [createSupplyIssueDraft()];
+    }
+}
+
 function ensureStockTransferDrafts() {
     if (!Array.isArray(state.stockTransferDrafts) || !state.stockTransferDrafts.length) {
         state.stockTransferDrafts = [createStockTransferDraft()];
+    }
+}
+
+function ensureSupplyTransferDrafts() {
+    if (!Array.isArray(state.supplyTransferDrafts) || !state.supplyTransferDrafts.length) {
+        state.supplyTransferDrafts = [createSupplyTransferDraft()];
     }
 }
 
@@ -1039,10 +1071,18 @@ function resetBranchScopedDrafts() {
     state.stockReceiptDrafts = [];
     state.stockTransfers = [];
     state.supplyItems = [];
+    state.supplyStore = [];
+    state.supplyIssues = [];
+    state.supplyTransfers = [];
     state.supplyReceiptDrafts = [];
     state.supplyReceipts = [];
+    state.supplyIssueDrafts = [];
     state.stockTransferDestinationBranchId = '';
     state.stockTransferDrafts = [];
+    state.supplyTransferDestinationBranchId = '';
+    state.supplyTransferDrafts = [];
+    state.stockReceiptCategory = 'raw';
+    state.stockTransferCategory = 'raw';
     currentAuditReport = null;
 }
 
@@ -2342,8 +2382,13 @@ function persistShiftDraftSnapshot() {
             kitchenDrafts: Array.isArray(state.kitchenDrafts) ? state.kitchenDrafts : [createKitchenDraftRow()],
             stockReceiptDrafts: Array.isArray(state.stockReceiptDrafts) ? state.stockReceiptDrafts : [createStockReceiptDraft()],
             supplyReceiptDrafts: Array.isArray(state.supplyReceiptDrafts) ? state.supplyReceiptDrafts : [createSupplyReceiptDraft()],
+            supplyIssueDrafts: Array.isArray(state.supplyIssueDrafts) ? state.supplyIssueDrafts : [createSupplyIssueDraft()],
             stockTransferDestinationBranchId: state.stockTransferDestinationBranchId || '',
             stockTransferDrafts: Array.isArray(state.stockTransferDrafts) ? state.stockTransferDrafts : [createStockTransferDraft()],
+            supplyTransferDestinationBranchId: state.supplyTransferDestinationBranchId || '',
+            supplyTransferDrafts: Array.isArray(state.supplyTransferDrafts) ? state.supplyTransferDrafts : [createSupplyTransferDraft()],
+            stockReceiptCategory: state.stockReceiptCategory || 'raw',
+            stockTransferCategory: state.stockTransferCategory || 'raw',
             barIssueDrafts: Array.isArray(state.barIssueDrafts) ? state.barIssueDrafts : [createBarIssueDraft()],
             keyStoreCheckDrafts: { ...(state.keyStoreCheckDrafts || {}) }
         };
@@ -2390,10 +2435,19 @@ function restoreShiftDraftSnapshot() {
         state.supplyReceiptDrafts = Array.isArray(snapshot?.supplyReceiptDrafts) && snapshot.supplyReceiptDrafts.length
             ? snapshot.supplyReceiptDrafts
             : [createSupplyReceiptDraft()];
+        state.supplyIssueDrafts = Array.isArray(snapshot?.supplyIssueDrafts) && snapshot.supplyIssueDrafts.length
+            ? snapshot.supplyIssueDrafts
+            : [createSupplyTransferDraft()];
         state.stockTransferDestinationBranchId = snapshot?.stockTransferDestinationBranchId || '';
         state.stockTransferDrafts = Array.isArray(snapshot?.stockTransferDrafts) && snapshot.stockTransferDrafts.length
             ? snapshot.stockTransferDrafts
             : [createStockTransferDraft()];
+        state.supplyTransferDestinationBranchId = snapshot?.supplyTransferDestinationBranchId || '';
+        state.supplyTransferDrafts = Array.isArray(snapshot?.supplyTransferDrafts) && snapshot.supplyTransferDrafts.length
+            ? snapshot.supplyTransferDrafts
+            : [createSupplyIssueDraft()];
+        state.stockReceiptCategory = snapshot?.stockReceiptCategory || 'raw';
+        state.stockTransferCategory = snapshot?.stockTransferCategory || 'raw';
         state.barIssueDrafts = Array.isArray(snapshot?.barIssueDrafts) && snapshot.barIssueDrafts.length
             ? snapshot.barIssueDrafts
             : [createBarIssueDraft()];
@@ -3018,6 +3072,26 @@ async function loadSupplyReceipts() {
     renderSupplyReceiptsView();
 }
 
+async function loadSupplyStore() {
+    const { data, error } = await repositories.getSupplyStore(getScope());
+    if (error) throw error;
+    state.supplyStore = data || [];
+}
+
+async function loadSupplyIssues() {
+    const { data, error } = await repositories.getSupplyIssues(getScope());
+    if (error) throw error;
+    state.supplyIssues = data || [];
+    renderSupplyIssueView();
+}
+
+async function loadSupplyTransfers() {
+    const { data, error } = await repositories.getSupplyTransfers(getScope());
+    if (error) throw error;
+    state.supplyTransfers = data || [];
+    renderSupplyTransferView();
+}
+
 async function loadStockTransfers() {
     const { data, error } = await repositories.getStockTransfers(getScope());
     if (error) throw error;
@@ -3262,10 +3336,24 @@ function updateDropdowns() {
     }
     if (activePageId === 'stocksPage') {
         if (currentStocksView === 'receipts') {
-            renderStockReceiptBatchInputs();
+            if (state.stockReceiptCategory === 'supplies') {
+                renderSupplyReceiptsView();
+            } else {
+                renderStockReceiptBatchInputs();
+            }
         }
         if (currentStocksView === 'issues') {
             renderBarIssueView();
+        }
+        if (currentStocksView === 'supplyIssues') {
+            renderSupplyIssueView();
+        }
+        if (currentStocksView === 'transfers') {
+            if (state.stockTransferCategory === 'supplies') {
+                renderSupplyTransferView();
+            } else {
+                renderStockTransferView();
+            }
         }
     }
 }
@@ -4156,6 +4244,197 @@ function renderSupplyReceiptsView() {
     `).join('') : '<tr><td colspan="8" style="text-align:center; padding:24px; color:#64748b;">No supplies received in this shift yet.</td></tr>';
 }
 
+function renderSupplyLevelsView() {
+    const body = document.getElementById('supplyStoreLevelsBody');
+    if (!body) return;
+
+    const searchValue = String(document.getElementById('supplyLevelsSearch')?.value || '').trim().toLowerCase();
+    const rows = (state.supplyStore || []).filter((row) => {
+        const name = getDisplaySupplyItemName(row.item_name_snapshot || '');
+        return !searchValue || name.toLowerCase().includes(searchValue);
+    });
+
+    if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:24px; color:#64748b;">No supplies match this view.</td></tr>';
+        return;
+    }
+
+    body.innerHTML = rows.map((row) => {
+        const currentStock = toNumber(row.stock_level ?? row.current_stock);
+        const reorderLevel = row.reorder_level ?? '';
+        const isOut = currentStock <= 0;
+        const isLow = reorderLevel !== '' && currentStock > 0 && currentStock <= toNumber(reorderLevel);
+        const status = isOut
+            ? { label: 'Out', background: '#fee2e2', color: '#b91c1c' }
+            : isLow
+                ? { label: 'Low', background: '#fef3c7', color: '#92400e' }
+                : { label: 'OK', background: '#dcfce7', color: '#166534' };
+
+        return `
+            <tr>
+                <td>${getDisplaySupplyItemName(row.item_name_snapshot)}</td>
+                <td>${row.category || '--'}</td>
+                <td>${row.buy_unit || '--'}</td>
+                <td style="font-weight:700;">${roundDisplayQuantityUp(currentStock)} ${row.buy_unit || ''}</td>
+                <td>${reorderLevel !== '' ? `${roundDisplayQuantityUp(reorderLevel)} ${row.buy_unit || ''}`.trim() : '--'}</td>
+                <td>${formatMoney(row.latest_unit_cost)}</td>
+                <td>
+                    <span style="display:inline-block; padding:6px 10px; border-radius:999px; background:${status.background}; color:${status.color}; font-weight:700; font-size:12px;">${status.label}</span>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function renderSupplyIssueView() {
+    const batchBody = document.getElementById('supplyIssueBatchBody');
+    const historyBody = document.getElementById('supplyIssueHistoryBody');
+    if (!batchBody || !historyBody) return;
+
+    ensureSupplyIssueDrafts();
+    const selectedItemIds = state.supplyIssueDrafts
+        .map((draft) => String(draft.supplyItemId || ''))
+        .filter(Boolean);
+    const supplyStoreByItemId = new Map((state.supplyStore || []).map((row) => [String(row.supply_item_id || ''), row]));
+
+    batchBody.innerHTML = state.supplyIssueDrafts.map((draft, index) => {
+        const selectedItem = (state.supplyItems || []).find((item) => String(item.id) === String(draft.supplyItemId || ''));
+        const inputValue = draft.itemSearch || (selectedItem ? getDisplaySupplyItemName(selectedItem.name) : '');
+        const storeRow = selectedItem ? supplyStoreByItemId.get(String(selectedItem.id)) : null;
+        const availableQty = toNumber(storeRow?.stock_level ?? storeRow?.current_stock);
+        const options = (state.supplyItems || []).map((item) => {
+            const itemId = String(item.id);
+            const isSelected = itemId === String(draft.supplyItemId || '');
+            const disabled = !isSelected && selectedItemIds.includes(itemId);
+            const label = getDisplaySupplyItemName(item.name);
+            return `<option value="${label}">${disabled ? `${label} (already selected)` : label}</option>`;
+        }).join('');
+
+        return `
+            <tr>
+                <td>
+                    <input
+                        type="text"
+                        id="supplyIssueItem${index}"
+                        name="supplyIssueItem${index}"
+                        list="supplyIssueItemList${index}"
+                        value="${inputValue}"
+                        placeholder="Start typing supply item"
+                        autocomplete="off"
+                        oninput="updateSupplyIssueDraft(${index}, 'itemSearch', this.value)"
+                        onchange="selectSupplyIssueItem(${index}, this.value)">
+                    <datalist id="supplyIssueItemList${index}">
+                        ${options}
+                    </datalist>
+                </td>
+                <td>${selectedItem?.buy_unit || '--'}</td>
+                <td style="font-weight:700; color:#166534;">${selectedItem ? `${formatQuantity(availableQty)} ${selectedItem.buy_unit || ''}`.trim() : '--'}</td>
+                <td><input type="number" id="supplyIssueQty${index}" name="supplyIssueQty${index}" min="0" step="0.01" value="${draft.qty || ''}" placeholder="0.00" oninput="updateSupplyIssueDraft(${index}, 'qty', this.value)"></td>
+                <td><input type="text" id="supplyIssueIssuedTo${index}" name="supplyIssueIssuedTo${index}" value="${draft.issuedTo || ''}" placeholder="Issued to / purpose" oninput="updateSupplyIssueDraft(${index}, 'issuedTo', this.value)"></td>
+                <td><input type="text" id="supplyIssueNotes${index}" name="supplyIssueNotes${index}" value="${draft.notes || ''}" placeholder="Optional note" oninput="updateSupplyIssueDraft(${index}, 'notes', this.value)"></td>
+                <td style="text-align:right;"><button class="btn" type="button" onclick="removeSupplyIssueLine(${index})" ${state.supplyIssueDrafts.length === 1 ? 'disabled' : ''}>Remove</button></td>
+            </tr>
+        `;
+    }).join('');
+
+    historyBody.innerHTML = (state.supplyIssues || []).length ? state.supplyIssues.map((row) => `
+        <tr>
+            <td>${formatDateDisplay(row.created_at)}</td>
+            <td>${getDisplaySupplyItemName(row.item_name_snapshot)}</td>
+            <td>${formatQuantity(row.qty_issued)} ${row.buy_unit || ''}</td>
+            <td>${row.issued_to || '--'}</td>
+            <td>${row.created_by || '--'}</td>
+            <td>${row.notes || '--'}</td>
+        </tr>
+    `).join('') : '<tr><td colspan="6" style="text-align:center; padding:24px; color:#64748b;">No supply issues recorded for this branch yet.</td></tr>';
+}
+
+function renderSupplyTransferView() {
+    ensureSupplyTransferDrafts();
+    const destinationBranches = getTransferDestinationBranches();
+    if (!state.supplyTransferDestinationBranchId && destinationBranches.length === 1) {
+        state.supplyTransferDestinationBranchId = destinationBranches[0].id;
+    }
+
+    const destinationSelect = document.getElementById('supplyTransferToBranch');
+    const sourceBranchNode = document.getElementById('supplyTransferFromBranchLabel');
+    const batchBody = document.getElementById('supplyTransferBatchBody');
+    const historyBody = document.getElementById('supplyTransfersBody');
+    const supplyStoreByItemId = new Map((state.supplyStore || []).map((row) => [String(row.supply_item_id || ''), row]));
+
+    if (sourceBranchNode) sourceBranchNode.innerText = getCurrentBranchName() || '--';
+    if (destinationSelect) {
+        destinationSelect.innerHTML = `<option value="">-- Select destination branch --</option>${
+            destinationBranches.map((branch) => `<option value="${branch.id}" ${String(branch.id) === String(state.supplyTransferDestinationBranchId || '') ? 'selected' : ''}>${branch.name}</option>`).join('')
+        }`;
+    }
+
+    if (batchBody) {
+        const selectedItemIds = state.supplyTransferDrafts
+            .map((draft) => String(draft.supplyItemId || ''))
+            .filter(Boolean);
+
+        batchBody.innerHTML = state.supplyTransferDrafts.map((draft, index) => {
+            const selectedItem = (state.supplyItems || []).find((item) => String(item.id) === String(draft.supplyItemId || ''));
+            const inputValue = draft.itemSearch || (selectedItem ? getDisplaySupplyItemName(selectedItem.name) : '');
+            const storeRow = selectedItem ? supplyStoreByItemId.get(String(selectedItem.id)) : null;
+            const availableQty = toNumber(storeRow?.stock_level ?? storeRow?.current_stock);
+            const options = (state.supplyItems || []).map((item) => {
+                const itemId = String(item.id);
+                const isSelected = itemId === String(draft.supplyItemId || '');
+                const disabled = !isSelected && selectedItemIds.includes(itemId);
+                const label = getDisplaySupplyItemName(item.name);
+                return `<option value="${label}">${disabled ? `${label} (already selected)` : label}</option>`;
+            }).join('');
+
+            return `
+                <tr>
+                    <td>
+                        <input
+                            type="text"
+                            id="supplyTransferItem${index}"
+                            name="supplyTransferItem${index}"
+                            list="supplyTransferItemList${index}"
+                            value="${inputValue}"
+                            placeholder="Start typing supply item"
+                            autocomplete="off"
+                            oninput="updateSupplyTransferDraftRow(${index}, 'itemSearch', this.value)"
+                            onchange="selectSupplyTransferItem(${index}, this.value)">
+                        <datalist id="supplyTransferItemList${index}">
+                            ${options}
+                        </datalist>
+                    </td>
+                    <td>${selectedItem?.buy_unit || '--'}</td>
+                    <td style="font-weight:700; color:#166534;">${selectedItem ? `${formatQuantity(availableQty)} ${selectedItem.buy_unit || ''}`.trim() : '--'}</td>
+                    <td><input type="number" id="supplyTransferQty${index}" name="supplyTransferQty${index}" min="0" step="0.01" value="${draft.qty || ''}" placeholder="0.00" oninput="updateSupplyTransferDraftRow(${index}, 'qty', this.value)"></td>
+                    <td><input type="text" id="supplyTransferNotes${index}" name="supplyTransferNotes${index}" value="${draft.notes || ''}" placeholder="Optional audit note" oninput="updateSupplyTransferDraftRow(${index}, 'notes', this.value)"></td>
+                    <td style="text-align:right;"><button class="btn" type="button" onclick="removeSupplyTransferLine(${index})" ${state.supplyTransferDrafts.length === 1 ? 'disabled' : ''}>Remove</button></td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    if (!historyBody) return;
+
+    const currentBranchId = state.branchId || state.user?.branch_id || state.user?.default_branch_id || '';
+    const rows = (state.supplyTransfers || []).filter((row) =>
+        String(row.from_branch_id) === String(currentBranchId) ||
+        String(row.to_branch_id) === String(currentBranchId)
+    );
+
+    historyBody.innerHTML = rows.length ? rows.map((row) => `
+        <tr>
+            <td>${formatDateDisplay(row.created_at)}</td>
+            <td>${getDisplaySupplyItemName(row.item_name_snapshot)}</td>
+            <td>${getBranchName(row.from_branch_id)}</td>
+            <td>${getBranchName(row.to_branch_id)}</td>
+            <td>${formatQuantity(row.qty)} ${row.buy_unit || ''}</td>
+            <td>${row.created_by || '--'}</td>
+            <td>${row.notes || '--'}</td>
+        </tr>
+    `).join('') : '<tr><td colspan="7" style="text-align:center; padding:24px; color:#64748b;">No supply transfers recorded for this branch yet.</td></tr>';
+}
+
 async function prepareStockTransferView() {
     if (!state.branchId && state.user?.id) {
         const { data: latestProfile, error: profileError } = await repositories.getProfile(state.user.id);
@@ -4182,20 +4461,44 @@ async function loadStocksViewData(view = currentStocksView) {
     const effectiveView = view || 'receipts';
 
     if (effectiveView === 'transfers') {
-        await prepareStockTransferView();
+        if (state.stockTransferCategory === 'supplies') {
+            if (!state.branches.length) await loadBranches();
+            await Promise.all([
+                loadSupplyItems(),
+                loadSupplyStore(),
+                loadSupplyTransfers()
+            ]);
+            ensureSupplyTransferDrafts();
+        } else {
+            await prepareStockTransferView();
+        }
         return;
     }
 
-    if (effectiveView === 'supplies') {
-        await loadSupplyItems();
-        ensureSupplyReceiptDrafts();
-        await loadSupplyReceipts();
+    if (effectiveView === 'receipts') {
+        if (state.stockReceiptCategory === 'supplies') {
+            await Promise.all([
+                loadSupplyItems(),
+                loadSupplyReceipts()
+            ]);
+            ensureSupplyReceiptDrafts();
+        } else {
+            await loadRawMaterials();
+            renderStockReceiptBatchInputs();
+            await loadStockReceipts();
+        }
         return;
     }
 
     if (effectiveView === 'levels') {
         await loadRawMaterials();
         renderStoreStockLevels();
+        return;
+    }
+
+    if (effectiveView === 'supplyLevels') {
+        await loadSupplyStore();
+        renderSupplyLevelsView();
         return;
     }
 
@@ -4208,43 +4511,66 @@ async function loadStocksViewData(view = currentStocksView) {
         return;
     }
 
-    await loadRawMaterials();
-    renderStockReceiptBatchInputs();
-    await loadStockReceipts();
+    if (effectiveView === 'supplyIssues') {
+        await Promise.all([
+            loadSupplyItems(),
+            loadSupplyStore(),
+            loadSupplyIssues()
+        ]);
+        ensureSupplyIssueDrafts();
+        renderSupplyIssueView();
+        return;
+    }
 }
 
 function setStocksView(view) {
     currentStocksView = view || 'receipts';
     const isLevels = view === 'levels';
+    const isSupplyLevels = view === 'supplyLevels';
     const isIssues = view === 'issues';
+    const isSupplyIssues = view === 'supplyIssues';
     const isTransfers = view === 'transfers';
-    const isSupplies = view === 'supplies';
     const receiptsView = document.getElementById('stocksReceiptsView');
-    const suppliesView = document.getElementById('stocksSuppliesView');
+    const suppliesReceiptView = document.getElementById('stocksSuppliesView');
     const levelsView = document.getElementById('stocksLevelsView');
+    const supplyLevelsView = document.getElementById('stocksSupplyLevelsView');
     const issuesView = document.getElementById('stocksIssuesView');
+    const supplyIssuesView = document.getElementById('stocksSupplyIssuesView');
     const transfersView = document.getElementById('stocksTransfersView');
     const receiptsButton = document.getElementById('stocksViewReceiptsBtn');
-    const suppliesButton = document.getElementById('stocksViewSuppliesBtn');
     const levelsButton = document.getElementById('stocksViewLevelsBtn');
+    const supplyLevelsButton = document.getElementById('stocksViewSupplyLevelsBtn');
     const issuesButton = document.getElementById('stocksViewIssuesBtn');
+    const supplyIssuesButton = document.getElementById('stocksViewSupplyIssuesBtn');
     const transfersButton = document.getElementById('stocksViewTransfersBtn');
+    const receiptCategorySelect = document.getElementById('stockReceiptCategory');
+    const receiptCategorySuppliesSelect = document.getElementById('stockReceiptCategorySupplies');
+    const transferCategorySelect = document.getElementById('stockTransferCategory');
+    const rawTransferSection = document.getElementById('stocksTransferRawSection');
+    const supplyTransferSection = document.getElementById('stocksTransferSupplySection');
+    const rawTransferHistory = document.getElementById('stocksTransferRawHistory');
+    const supplyTransferHistory = document.getElementById('stocksTransferSupplyHistory');
 
-    if (receiptsView) receiptsView.classList.toggle('hidden', isLevels || isIssues || isTransfers || isSupplies);
-    if (suppliesView) suppliesView.classList.toggle('hidden', !isSupplies);
+    if (receiptCategorySelect) receiptCategorySelect.value = state.stockReceiptCategory || 'raw';
+    if (receiptCategorySuppliesSelect) receiptCategorySuppliesSelect.value = state.stockReceiptCategory || 'supplies';
+    if (transferCategorySelect) transferCategorySelect.value = state.stockTransferCategory || 'raw';
+
+    if (receiptsView) receiptsView.classList.toggle('hidden', view !== 'receipts' || state.stockReceiptCategory === 'supplies');
+    if (suppliesReceiptView) suppliesReceiptView.classList.toggle('hidden', view !== 'receipts' || state.stockReceiptCategory !== 'supplies');
     if (levelsView) levelsView.classList.toggle('hidden', !isLevels);
+    if (supplyLevelsView) supplyLevelsView.classList.toggle('hidden', !isSupplyLevels);
     if (issuesView) issuesView.classList.toggle('hidden', !isIssues);
+    if (supplyIssuesView) supplyIssuesView.classList.toggle('hidden', !isSupplyIssues);
     if (transfersView) transfersView.classList.toggle('hidden', !isTransfers);
+    if (rawTransferSection) rawTransferSection.classList.toggle('hidden', state.stockTransferCategory === 'supplies');
+    if (supplyTransferSection) supplyTransferSection.classList.toggle('hidden', state.stockTransferCategory !== 'supplies');
+    if (rawTransferHistory) rawTransferHistory.classList.toggle('hidden', state.stockTransferCategory === 'supplies');
+    if (supplyTransferHistory) supplyTransferHistory.classList.toggle('hidden', state.stockTransferCategory !== 'supplies');
 
     if (receiptsButton) {
-        const active = !isLevels && !isTransfers && !isSupplies;
+        const active = !isLevels && !isSupplyLevels && !isTransfers && !isSupplyIssues && !isIssues;
         receiptsButton.style.background = active ? '#7092ae' : '#edf2f7';
         receiptsButton.style.color = active ? 'white' : '#2d3748';
-    }
-
-    if (suppliesButton) {
-        suppliesButton.style.background = isSupplies ? '#7092ae' : '#edf2f7';
-        suppliesButton.style.color = isSupplies ? 'white' : '#2d3748';
     }
 
     if (levelsButton) {
@@ -4252,10 +4578,20 @@ function setStocksView(view) {
         levelsButton.style.color = isLevels ? 'white' : '#2d3748';
     }
 
+    if (supplyLevelsButton) {
+        supplyLevelsButton.style.background = isSupplyLevels ? '#7092ae' : '#edf2f7';
+        supplyLevelsButton.style.color = isSupplyLevels ? 'white' : '#2d3748';
+    }
+
     if (issuesButton) {
         issuesButton.classList.toggle('hidden', !isDirectSalesMode());
         issuesButton.style.background = isIssues ? '#7092ae' : '#edf2f7';
         issuesButton.style.color = isIssues ? 'white' : '#2d3748';
+    }
+
+    if (supplyIssuesButton) {
+        supplyIssuesButton.style.background = isSupplyIssues ? '#7092ae' : '#edf2f7';
+        supplyIssuesButton.style.color = isSupplyIssues ? 'white' : '#2d3748';
     }
 
     if (transfersButton) {
@@ -4267,16 +4603,32 @@ function setStocksView(view) {
         renderStoreStockLevels();
     }
 
-    if (isSupplies) {
-        renderSupplyReceiptsView();
+    if (isSupplyLevels) {
+        renderSupplyLevelsView();
     }
 
     if (isIssues) {
         renderBarIssueView();
     }
 
+    if (isSupplyIssues) {
+        renderSupplyIssueView();
+    }
+
     if (isTransfers) {
-        renderStockTransferView();
+        if (state.stockTransferCategory === 'supplies') {
+            renderSupplyTransferView();
+        } else {
+            renderStockTransferView();
+        }
+    }
+
+    if (view === 'receipts') {
+        if (state.stockReceiptCategory === 'supplies') {
+            renderSupplyReceiptsView();
+        } else {
+            renderStockReceiptBatchInputs();
+        }
     }
 }
 
@@ -5011,6 +5363,8 @@ window.loadSupplyItems = async () => {
     try {
         await loadSupplyItems();
         renderSupplyReceiptsView();
+        renderSupplyIssueView();
+        renderSupplyTransferView();
     } catch (error) {
         handleError(error, 'Failed to load supply items');
     }
@@ -5022,16 +5376,40 @@ window.loadSupplyReceipts = async () => {
         handleError(error, 'Failed to load supply receipts');
     }
 };
+window.loadSupplyStore = async () => {
+    try {
+        await loadSupplyStore();
+        renderSupplyLevelsView();
+    } catch (error) {
+        handleError(error, 'Failed to load supply store');
+    }
+};
+window.loadSupplyIssues = async () => {
+    try {
+        await loadSupplyIssues();
+    } catch (error) {
+        handleError(error, 'Failed to load supply issues');
+    }
+};
+window.loadSupplyTransfers = async () => {
+    try {
+        await loadSupplyTransfers();
+    } catch (error) {
+        handleError(error, 'Failed to load supply transfers');
+    }
+};
 window.loadBranches = async () => {
     try {
         await loadBranches();
         renderBarIssueView();
         renderStockTransferView();
+        renderSupplyTransferView();
     } catch (error) {
         handleError(error, 'Failed to load branches');
     }
 };
 window.renderStoreStockLevels = renderStoreStockLevels;
+window.renderSupplyLevelsView = renderSupplyLevelsView;
 window.switchBranchContext = async (branchId) => {
     try {
         if (!canSwitchBranches(state.role)) {
@@ -5401,11 +5779,26 @@ window.selectSupplyReceiptItem = (index, value) => {
     persistShiftDraftSnapshot();
 };
 
+window.setStockReceiptCategory = async (category) => {
+    state.stockReceiptCategory = category === 'supplies' ? 'supplies' : 'raw';
+    await loadStocksViewData('receipts');
+    setStocksView('receipts');
+    persistShiftDraftSnapshot();
+};
+
 window.updateStockTransferDraft = (field, value) => {
     if (field === 'toBranchId') {
-        state.stockTransferDestinationBranchId = value;
+        if (state.stockTransferCategory === 'supplies') {
+            state.supplyTransferDestinationBranchId = value;
+        } else {
+            state.stockTransferDestinationBranchId = value;
+        }
     }
-    renderStockTransferView();
+    if (state.stockTransferCategory === 'supplies') {
+        renderSupplyTransferView();
+    } else {
+        renderStockTransferView();
+    }
     persistShiftDraftSnapshot();
 };
 
@@ -5423,6 +5816,105 @@ window.removeStockTransferLine = (index) => {
         state.stockTransferDrafts = [createStockTransferDraft()];
     }
     renderStockTransferView();
+    persistShiftDraftSnapshot();
+};
+
+window.setStockTransferCategory = async (category) => {
+    state.stockTransferCategory = category === 'supplies' ? 'supplies' : 'raw';
+    await loadStocksViewData('transfers');
+    setStocksView('transfers');
+    persistShiftDraftSnapshot();
+};
+
+window.addSupplyIssueLine = () => {
+    ensureSupplyIssueDrafts();
+    state.supplyIssueDrafts = [createSupplyIssueDraft(), ...state.supplyIssueDrafts];
+    renderSupplyIssueView();
+    persistShiftDraftSnapshot();
+};
+
+window.removeSupplyIssueLine = (index) => {
+    ensureSupplyIssueDrafts();
+    state.supplyIssueDrafts = state.supplyIssueDrafts.filter((_, rowIndex) => rowIndex !== index);
+    if (!state.supplyIssueDrafts.length) {
+        state.supplyIssueDrafts = [createSupplyIssueDraft()];
+    }
+    renderSupplyIssueView();
+    persistShiftDraftSnapshot();
+};
+
+window.updateSupplyIssueDraft = (index, field, value) => {
+    ensureSupplyIssueDrafts();
+    state.supplyIssueDrafts = state.supplyIssueDrafts.map((draft, rowIndex) => (
+        rowIndex === index ? { ...draft, [field]: value } : draft
+    ));
+    persistShiftDraftSnapshot();
+};
+
+window.selectSupplyIssueItem = (index, value) => {
+    ensureSupplyIssueDrafts();
+    const supplyItem = findSupplyItemByDisplayName(value);
+    if (!supplyItem) {
+        state.supplyIssueDrafts = state.supplyIssueDrafts.map((draft, rowIndex) => (
+            rowIndex === index ? { ...draft, supplyItemId: '', itemSearch: value } : draft
+        ));
+        renderSupplyIssueView();
+        persistShiftDraftSnapshot();
+        return;
+    }
+
+    state.supplyIssueDrafts = state.supplyIssueDrafts.map((draft, rowIndex) => (
+        rowIndex === index
+            ? { ...draft, supplyItemId: supplyItem.id, itemSearch: getDisplaySupplyItemName(supplyItem.name) }
+            : draft
+    ));
+    renderSupplyIssueView();
+    persistShiftDraftSnapshot();
+};
+
+window.addSupplyTransferLine = () => {
+    ensureSupplyTransferDrafts();
+    state.supplyTransferDrafts = [...state.supplyTransferDrafts, createSupplyTransferDraft()];
+    renderSupplyTransferView();
+    persistShiftDraftSnapshot();
+};
+
+window.removeSupplyTransferLine = (index) => {
+    ensureSupplyTransferDrafts();
+    state.supplyTransferDrafts = state.supplyTransferDrafts.filter((_, rowIndex) => rowIndex !== index);
+    if (!state.supplyTransferDrafts.length) {
+        state.supplyTransferDrafts = [createSupplyTransferDraft()];
+    }
+    renderSupplyTransferView();
+    persistShiftDraftSnapshot();
+};
+
+window.updateSupplyTransferDraftRow = (index, field, value) => {
+    ensureSupplyTransferDrafts();
+    state.supplyTransferDrafts = state.supplyTransferDrafts.map((draft, rowIndex) => (
+        rowIndex === index ? { ...draft, [field]: value } : draft
+    ));
+    persistShiftDraftSnapshot();
+};
+
+window.selectSupplyTransferItem = (index, value) => {
+    ensureSupplyTransferDrafts();
+    const supplyItem = findSupplyItemByDisplayName(value);
+    if (!supplyItem) {
+        state.supplyTransferDrafts = state.supplyTransferDrafts.map((draft, rowIndex) => (
+            rowIndex === index ? { ...draft, supplyItemId: '', itemSearch: value } : draft
+        ));
+        renderSupplyTransferView();
+        persistShiftDraftSnapshot();
+        return;
+    }
+
+    state.supplyTransferDrafts = state.supplyTransferDrafts.map((draft, rowIndex) => (
+        rowIndex === index
+            ? { ...draft, supplyItemId: supplyItem.id, itemSearch: getDisplaySupplyItemName(supplyItem.name) }
+            : draft
+    ));
+    renderSupplyTransferView();
     persistShiftDraftSnapshot();
 };
 
@@ -5959,6 +6451,9 @@ window.adjustKitchenProduction = async (productId) => {
 };
 
 window.processStockReceipt = async () => {
+    if (state.stockReceiptCategory === 'supplies') {
+        return window.processSupplyReceipt();
+    }
     const button = document.querySelector('#stocksPage .btn.btn-success');
     setLoading(button, true);
     try {
@@ -6142,27 +6637,26 @@ window.processSupplyReceipt = async () => {
         const insertedReceiptIds = [];
         try {
             for (const row of populatedRows) {
-                const unitCost = row.totalReceivedCost / row.qty;
-                const receiptResult = await repositories.insertSupplyReceipt(getScope(), {
+                const receiptResult = await recordSupplyReceipt(getScope(), repositories, {
                     shiftId: state.currentShift?.id || null,
-                    supplyItemId: row.supplyItemId,
-                    itemName: row.itemName,
-                    category: row.category || 'General Supplies',
+                    supplyItem: {
+                        id: row.supplyItemId,
+                        name: row.itemName,
+                        category: row.category || 'General Supplies',
+                        buy_unit: row.buyUnit
+                    },
                     qtyReceived: row.qty,
-                    buyUnit: row.buyUnit,
                     totalReceivedCost: row.totalReceivedCost,
-                    unitCost,
                     notes: row.notes,
                     receivedBy: getProfileDisplayName(state.user)
                 });
-                if (receiptResult.error) throw receiptResult.error;
-                if (receiptResult.data?.id) {
-                    insertedReceiptIds.push(receiptResult.data.id);
+                if (receiptResult?.data?.receipt?.id) {
+                    insertedReceiptIds.push(receiptResult.data.receipt.id);
                 }
             }
         } catch (error) {
             for (const receiptId of insertedReceiptIds.reverse()) {
-                await supabase.from('supply_receipts').delete().eq('id', receiptId);
+                await repositories.deleteSupplyReceipt(getScope(), receiptId);
             }
             throw error;
         }
@@ -6172,6 +6666,7 @@ window.processSupplyReceipt = async () => {
         clearReferenceDataCaches();
         await loadSupplyItems();
         await loadSupplyReceipts();
+        await loadSupplyStore();
         renderSupplyReceiptsView();
         showAppToast(`Recorded ${populatedRows.length} supply receipt${populatedRows.length === 1 ? '' : 's'} successfully.`);
     } catch (error) {
@@ -6181,7 +6676,118 @@ window.processSupplyReceipt = async () => {
     }
 };
 
+window.processSupplyIssue = async () => {
+    const button = document.getElementById('processSupplyIssueBtn');
+    setLoading(button, true);
+    try {
+        requirePermission(PERMISSIONS.RECEIVE_STOCK);
+        ensureSupplyIssueDrafts();
+
+        const populatedRows = state.supplyIssueDrafts
+            .map((draft, index) => ({
+                index,
+                supplyItemId: String(draft.supplyItemId || ''),
+                itemSearch: String(draft.itemSearch || '').trim(),
+                qty: toNumber(draft.qty),
+                issuedTo: String(draft.issuedTo || '').trim(),
+                notes: String(draft.notes || '').trim()
+            }))
+            .filter((row) => row.supplyItemId || row.itemSearch || row.qty > 0 || row.issuedTo || row.notes);
+
+        if (!populatedRows.length) throw new Error('Add at least one supply issue line before posting.');
+
+        for (const row of populatedRows) {
+            if (!row.itemSearch) throw new Error(`Issue line ${row.index + 1}: enter a supply item.`);
+            if (row.qty <= 0) throw new Error(`Issue line ${row.index + 1}: quantity must be greater than 0.`);
+            if (!row.issuedTo) throw new Error(`Issue line ${row.index + 1}: issued to / purpose is required.`);
+
+            const supplyItem = row.supplyItemId
+                ? (state.supplyItems || []).find((item) => String(item.id) === row.supplyItemId)
+                : findSupplyItemByDisplayName(row.itemSearch);
+            if (!supplyItem) throw new Error(`Issue line ${row.index + 1}: selected supply item was not found.`);
+
+            await issueSupplyStock(getScope(), repositories, {
+                shiftId: state.currentShift?.id || null,
+                supplyItem,
+                qtyIssued: row.qty,
+                issuedTo: row.issuedTo,
+                notes: row.notes,
+                createdBy: getProfileDisplayName(state.user)
+            });
+        }
+
+        state.supplyIssueDrafts = [createSupplyIssueDraft()];
+        persistShiftDraftSnapshot();
+        clearReferenceDataCaches();
+        await Promise.all([loadSupplyStore(), loadSupplyIssues()]);
+        renderSupplyIssueView();
+        showAppToast(`Recorded ${populatedRows.length} supply issue${populatedRows.length === 1 ? '' : 's'} successfully.`);
+    } catch (error) {
+        handleError(error, 'Failed to issue supplies');
+    } finally {
+        setLoading(button, false);
+    }
+};
+
 window.processStockTransfer = async () => {
+    if (state.stockTransferCategory === 'supplies') {
+        const button = document.getElementById('processSupplyTransferBtn');
+        setLoading(button, true);
+        try {
+            requirePermission(PERMISSIONS.RECEIVE_STOCK);
+            ensureSupplyTransferDrafts();
+            const sourceBranchId = state.branchId || state.user?.branch_id || state.user?.default_branch_id || '';
+            const toBranchId = String(
+                document.getElementById('supplyTransferToBranch')?.value ||
+                state.supplyTransferDestinationBranchId ||
+                ''
+            ).trim();
+
+            if (!sourceBranchId) throw new Error('Your user profile is missing a source branch.');
+            if (!toBranchId) throw new Error('Select a destination branch for the supply transfer.');
+
+            const populatedRows = state.supplyTransferDrafts
+                .map((draft, index) => ({
+                    index,
+                    supplyItemId: String(draft.supplyItemId || ''),
+                    qty: toNumber(draft.qty),
+                    notes: String(draft.notes || '').trim()
+                }))
+                .filter((row) => row.supplyItemId || row.qty > 0 || row.notes);
+
+            if (!populatedRows.length) throw new Error('Add at least one supply transfer line before posting.');
+
+            for (const row of populatedRows) {
+                if (!row.supplyItemId) throw new Error(`Transfer line ${row.index + 1}: select a supply item.`);
+                if (row.qty <= 0) throw new Error(`Transfer line ${row.index + 1}: quantity must be greater than 0.`);
+                const supplyItem = (state.supplyItems || []).find((item) => String(item.id) === row.supplyItemId);
+                if (!supplyItem) throw new Error(`Transfer line ${row.index + 1}: selected supply item was not found.`);
+
+                await transferSupplyStock(getScope(), repositories, {
+                    fromBranchId: sourceBranchId,
+                    toBranchId,
+                    supplyItem,
+                    qty: row.qty,
+                    notes: row.notes,
+                    createdBy: state.username || 'Staff',
+                    latestUnitCost: toNumber((state.supplyStore || []).find((entry) => String(entry.supply_item_id || '') === row.supplyItemId)?.latest_unit_cost)
+                });
+            }
+
+            state.supplyTransferDrafts = [createSupplyTransferDraft()];
+            persistShiftDraftSnapshot();
+            clearReferenceDataCaches();
+            await Promise.all([loadSupplyStore(), loadSupplyTransfers()]);
+            renderSupplyTransferView();
+            showAppToast(`Recorded ${populatedRows.length} supply transfer${populatedRows.length === 1 ? '' : 's'} successfully.`);
+        } catch (error) {
+            handleError(error, 'Failed to transfer supplies');
+        } finally {
+            setLoading(button, false);
+        }
+        return;
+    }
+
     const button = document.getElementById('processStockTransferBtn');
     setLoading(button, true);
     try {

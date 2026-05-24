@@ -20,6 +20,9 @@ export const state = {
     rawMaterials: [],
     keyStoreChecks: [],
     supplyItems: [],
+    supplyStore: [],
+    supplyIssues: [],
+    supplyTransfers: [],
     recipeMatrix: [],
     currentShiftTotal: 0,
     currentShift: null,
@@ -41,9 +44,14 @@ export const state = {
     stockReceipts: [],
     supplyReceiptDrafts: [],
     supplyReceipts: [],
+    supplyIssueDrafts: [],
     stockTransfers: [],
     stockTransferDestinationBranchId: '',
     stockTransferDrafts: [],
+    supplyTransferDestinationBranchId: '',
+    supplyTransferDrafts: [],
+    stockReceiptCategory: 'raw',
+    stockTransferCategory: 'raw',
     barStockIssues: [],
     barIssueDrafts: [],
     keyStoreCheckDrafts: {}
@@ -131,6 +139,9 @@ export function resetAppState() {
     state.rawMaterials = [];
     state.keyStoreChecks = [];
     state.supplyItems = [];
+    state.supplyStore = [];
+    state.supplyIssues = [];
+    state.supplyTransfers = [];
     state.recipeMatrix = [];
     state.currentShiftTotal = 0;
     state.currentShift = null;
@@ -152,9 +163,14 @@ export function resetAppState() {
     state.stockReceipts = [];
     state.supplyReceiptDrafts = [];
     state.supplyReceipts = [];
+    state.supplyIssueDrafts = [];
     state.stockTransfers = [];
     state.stockTransferDestinationBranchId = '';
     state.stockTransferDrafts = [];
+    state.supplyTransferDestinationBranchId = '';
+    state.supplyTransferDrafts = [];
+    state.stockReceiptCategory = 'raw';
+    state.stockTransferCategory = 'raw';
     state.barStockIssues = [];
     state.barIssueDrafts = [];
     state.keyStoreCheckDrafts = {};

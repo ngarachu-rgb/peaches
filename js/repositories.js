@@ -3,7 +3,9 @@ const TABLES_WITH_BRANCH = new Set([
     'main_store',
     'shift_store_checks',
     'supply_items',
+    'supply_store',
     'supply_receipts',
+    'supply_issues',
     'recipes',
     'stock_receipts',
     'bar_stock_issues',
@@ -20,7 +22,9 @@ const BRANCH_READY_TABLES = new Set([
     'main_store',
     'shift_store_checks',
     'supply_items',
+    'supply_store',
     'supply_receipts',
+    'supply_issues',
     'stock_receipts',
     'bar_stock_issues',
     'expenses',
@@ -176,6 +180,49 @@ const STOCK_TRANSFER_COLUMNS = [
     'created_at'
 ].join(', ');
 
+const SUPPLY_STORE_COLUMNS = selectColumns('supply_store', [
+    'id',
+    'restaurant_id',
+    'supply_item_id',
+    'item_name_snapshot',
+    'category',
+    'buy_unit',
+    'current_stock',
+    'stock_level',
+    'reorder_level',
+    'latest_unit_cost',
+    'created_at',
+    'updated_at'
+].join(', '));
+
+const SUPPLY_ISSUE_COLUMNS = selectColumns('supply_issues', [
+    'id',
+    'restaurant_id',
+    'shift_id',
+    'supply_item_id',
+    'item_name_snapshot',
+    'qty_issued',
+    'buy_unit',
+    'issued_to',
+    'notes',
+    'created_by',
+    'created_at'
+].join(', '));
+
+const SUPPLY_TRANSFER_COLUMNS = [
+    'id',
+    'restaurant_id',
+    'from_branch_id',
+    'to_branch_id',
+    'supply_item_id',
+    'item_name_snapshot',
+    'qty',
+    'buy_unit',
+    'notes',
+    'created_by',
+    'created_at'
+].join(', ');
+
 function getBranchCacheKey(context = {}) {
     return String(context?.restaurantId || 'none');
 }
@@ -302,6 +349,35 @@ async function fetchFirstRow(query) {
     }
 
     return { data: data?.[0] || null, error: null };
+}
+
+function normalizeTextMatch(value) {
+    return String(value || '').trim().toLowerCase();
+}
+
+async function findRawMaterialByBranchNormalized(supabase, context, branchId, materialName, includeReorderLevel = true) {
+    const baseColumns = includeReorderLevel
+        ? 'id, restaurant_id, branch_id, name, buy_unit, store_unit, conversion_factor, price, current_stock, stock_level, reorder_level'
+        : 'id, restaurant_id, branch_id, name, buy_unit, store_unit, conversion_factor, price, current_stock, stock_level';
+
+    const query = applyScope(
+        supabase
+            .from('main_store')
+            .select(selectColumns('main_store', baseColumns))
+            .eq('branch_id', branchId),
+        'main_store',
+        context,
+        { branch: false }
+    );
+
+    const { data, error } = await query;
+    if (error) {
+        return { data: null, error };
+    }
+
+    const targetName = normalizeTextMatch(materialName);
+    const match = (data || []).find((row) => normalizeTextMatch(row.name) === targetName) || null;
+    return { data: match, error: null };
 }
 
 function ensureRowId(row) {
@@ -1072,11 +1148,14 @@ export function createRepositories(supabase) {
             );
 
             const richerResult = await fetchFirstRow(richerQuery);
-            if (!richerResult.error || !isMissingColumnError(richerResult.error, 'main_store', 'reorder_level')) {
+            if (richerResult.data?.id || richerResult.error || !isMissingColumnError(richerResult.error, 'main_store', 'reorder_level')) {
+                if (!richerResult.data?.id && !richerResult.error) {
+                    return findRawMaterialByBranchNormalized(supabase, context, branchId, materialName, true);
+                }
                 return richerResult;
             }
 
-            return fetchFirstRow(
+            const fallbackResult = await fetchFirstRow(
                 applyScope(
                     supabase
                         .from('main_store')
@@ -1088,6 +1167,11 @@ export function createRepositories(supabase) {
                     { branch: false }
                 )
             );
+            if (!fallbackResult.data?.id && !fallbackResult.error) {
+                return findRawMaterialByBranchNormalized(supabase, context, branchId, materialName, false);
+            }
+
+            return fallbackResult;
         },
 
         saveRawMaterial(context, payload, id = '') {
@@ -1279,6 +1363,199 @@ export function createRepositories(supabase) {
                 })])
                 .select(selectColumns('supply_receipts', 'id, restaurant_id, shift_id, supply_item_id, item_name, category, qty_received, buy_unit, total_received_cost, unit_cost, notes, received_by, created_at'))
                 .single();
+        },
+
+        deleteSupplyReceipt(context, id) {
+            return applyScope(
+                supabase.from('supply_receipts').delete().eq('id', id),
+                'supply_receipts',
+                context
+            );
+        },
+
+        getSupplyStore(context) {
+            return applyScope(
+                supabase
+                    .from('supply_store')
+                    .select(SUPPLY_STORE_COLUMNS)
+                    .order('item_name_snapshot', { ascending: true }),
+                'supply_store',
+                context
+            );
+        },
+
+        async getSupplyStoreRowByBranch(context, branchId, supplyItemId) {
+            return fetchFirstRow(
+                applyScope(
+                    supabase
+                        .from('supply_store')
+                        .select(SUPPLY_STORE_COLUMNS)
+                        .eq('branch_id', branchId)
+                        .eq('supply_item_id', supplyItemId),
+                    'supply_store',
+                    context,
+                    { branch: false }
+                )
+            );
+        },
+
+        createSupplyStoreRowInBranch(context, branchId, payload) {
+            return supabase
+                .from('supply_store')
+                .insert([{
+                    restaurant_id: context.restaurantId,
+                    branch_id: branchId,
+                    supply_item_id: payload.supplyItemId,
+                    item_name_snapshot: payload.itemName,
+                    category: payload.category,
+                    buy_unit: payload.buyUnit,
+                    stock_level: toNumber(payload.stockLevel),
+                    current_stock: toNumber(payload.currentStock),
+                    reorder_level: payload.reorderLevel ?? null,
+                    latest_unit_cost: toNumber(payload.latestUnitCost)
+                }])
+                .select(SUPPLY_STORE_COLUMNS)
+                .single();
+        },
+
+        updateSupplyStoreRow(context, id, payload) {
+            return applyScope(
+                supabase
+                    .from('supply_store')
+                    .update(payload)
+                    .eq('id', id)
+                    .select(SUPPLY_STORE_COLUMNS)
+                    .single(),
+                'supply_store',
+                context,
+                { branch: false }
+            );
+        },
+
+        async adjustSupplyStoreStockByBranch(context, branchId, supplyItemId, delta, metadata = {}) {
+            let { data, error } = await this.getSupplyStoreRowByBranch(context, branchId, supplyItemId);
+            if (error) return { data: null, error };
+
+            if (!data?.id) {
+                if (toNumber(delta) < 0) {
+                    return {
+                        data: null,
+                        error: new Error(`Supply item was not found in the selected branch store.`)
+                    };
+                }
+
+                const created = await this.createSupplyStoreRowInBranch(context, branchId, {
+                    supplyItemId,
+                    itemName: metadata.itemName || 'Supply Item',
+                    category: metadata.category || 'General Supplies',
+                    buyUnit: metadata.buyUnit || '',
+                    stockLevel: 0,
+                    currentStock: 0,
+                    reorderLevel: metadata.reorderLevel ?? null,
+                    latestUnitCost: metadata.latestUnitCost ?? 0
+                });
+                if (created.error) return created;
+                data = created.data;
+            }
+
+            const currentValue = toNumber(data.stock_level ?? data.current_stock);
+            const nextValue = currentValue + toNumber(delta);
+            if (nextValue < 0) {
+                return {
+                    data: null,
+                    error: new Error(
+                        `Insufficient supply stock for ${metadata.itemName || data.item_name_snapshot || 'selected item'} in the selected branch. ` +
+                        `Available: ${currentValue}. Needed: ${Math.abs(toNumber(delta))}.`
+                    )
+                };
+            }
+
+            const nextPayload = {
+                stock_level: nextValue,
+                current_stock: nextValue,
+                item_name_snapshot: metadata.itemName || data.item_name_snapshot,
+                category: metadata.category || data.category,
+                buy_unit: metadata.buyUnit || data.buy_unit,
+                latest_unit_cost: metadata.latestUnitCost !== undefined ? toNumber(metadata.latestUnitCost) : toNumber(data.latest_unit_cost)
+            };
+
+            return this.updateSupplyStoreRow(context, data.id, nextPayload);
+        },
+
+        getSupplyIssues(context) {
+            return applyScope(
+                supabase
+                    .from('supply_issues')
+                    .select(SUPPLY_ISSUE_COLUMNS)
+                    .order('created_at', { ascending: false }),
+                'supply_issues',
+                context
+            );
+        },
+
+        insertSupplyIssue(context, payload) {
+            return supabase
+                .from('supply_issues')
+                .insert([attachBranchPayload('supply_issues', context, {
+                    restaurant_id: context.restaurantId,
+                    shift_id: payload.shiftId,
+                    supply_item_id: payload.supplyItemId,
+                    item_name_snapshot: payload.itemName,
+                    qty_issued: payload.qtyIssued,
+                    buy_unit: payload.buyUnit,
+                    issued_to: payload.issuedTo,
+                    notes: payload.notes,
+                    created_by: payload.createdBy
+                })])
+                .select(SUPPLY_ISSUE_COLUMNS)
+                .single();
+        },
+
+        deleteSupplyIssue(context, id) {
+            return applyScope(
+                supabase.from('supply_issues').delete().eq('id', id),
+                'supply_issues',
+                context
+            );
+        },
+
+        getSupplyTransfers(context) {
+            return applyScope(
+                supabase
+                    .from('supply_transfers')
+                    .select(SUPPLY_TRANSFER_COLUMNS)
+                    .order('created_at', { ascending: false }),
+                'supply_transfers',
+                context,
+                { branch: false }
+            );
+        },
+
+        insertSupplyTransfer(context, payload) {
+            return supabase
+                .from('supply_transfers')
+                .insert([{
+                    restaurant_id: context.restaurantId,
+                    from_branch_id: payload.fromBranchId,
+                    to_branch_id: payload.toBranchId,
+                    supply_item_id: payload.supplyItemId,
+                    item_name_snapshot: payload.itemName,
+                    qty: payload.qty,
+                    buy_unit: payload.buyUnit,
+                    notes: payload.notes,
+                    created_by: payload.createdBy
+                }])
+                .select(SUPPLY_TRANSFER_COLUMNS)
+                .single();
+        },
+
+        deleteSupplyTransfer(context, id) {
+            return applyScope(
+                supabase.from('supply_transfers').delete().eq('id', id),
+                'supply_transfers',
+                context,
+                { branch: false }
+            );
         },
 
         async importRawMaterials(context, batch, existingMaterials = []) {
@@ -1507,7 +1784,7 @@ export function createRepositories(supabase) {
         },
 
         async adjustRawMaterialStoreStockByBranch(context, branchId, materialName, delta) {
-            const { data, error } = await fetchFirstRow(
+            let { data, error } = await fetchFirstRow(
                 applyScope(
                     supabase
                         .from('main_store')
@@ -1519,6 +1796,15 @@ export function createRepositories(supabase) {
                     { branch: false }
                 )
             );
+            if (!data?.id && !error) {
+                ({ data, error } = await findRawMaterialByBranchNormalized(
+                    supabase,
+                    context,
+                    branchId,
+                    materialName,
+                    false
+                ));
+            }
             if (error) return { data: null, error };
             if (!data?.id) {
                 return {
