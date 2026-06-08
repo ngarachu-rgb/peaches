@@ -228,6 +228,10 @@ function toNumber(value) {
     return Number.isFinite(normalized) ? normalized : 0;
 }
 
+function toNonNegativeNumber(value) {
+    return Math.max(0, toNumber(value));
+}
+
 function formatMoney(value) {
     return toNumber(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -2819,15 +2823,15 @@ async function loadInventory(options = {}) {
         const openingQty = toNumber(shiftRow?.bbf);
         const availableQty = usesDirectMath
             ? (measuredItem
-                ? openingQty + toNumber(shiftRow?.added_today)
+                ? openingQty + toNonNegativeNumber(shiftRow?.added_today)
                 : getSellableUnitsForMaterial(resolveDirectSalesMaterial(product.name, state.rawMaterials)))
             : 0;
         const issuedOutQty = isDirectMode && !measuredItem ? getIssuedSourceQtyForProduct(product.name) : 0;
         const addedQty = usesDirectMath
             ? (measuredItem
-                ? toNumber(shiftRow?.added_today)
-                : (availableQty + issuedOutQty - openingQty))
-            : toNumber(shiftRow?.added_today);
+                ? toNonNegativeNumber(shiftRow?.added_today)
+                : Math.max(0, availableQty + issuedOutQty - openingQty))
+            : toNonNegativeNumber(shiftRow?.added_today);
         return {
             id: shiftRow?.id || null,
             product_id: product.id,
@@ -3920,7 +3924,7 @@ function buildShiftRecallRows(shiftInventoryRows, products, options = {}) {
             const savedLineTotal = toNumber(row.line_total);
             const price = savedUnitPrice > 0 ? savedUnitPrice : toNumber(product?.price);
             let opening = toNumber(row.bbf);
-            let added = toNumber(row.added_today);
+            let added = toNonNegativeNumber(row.added_today);
             let closing = toNumber(row.close_qty);
             const soldQty = toNumber(row.sold_qty);
 
@@ -3932,7 +3936,7 @@ function buildShiftRecallRows(shiftInventoryRows, products, options = {}) {
                     closing = toNumber(nextInventoryMap.get(String(row.product_id))?.bbf);
                 }
                 if (added === 0) {
-                    added = toNumber(measuredIssueMap.get(String(productName || '').trim().toLowerCase()));
+                    added = toNonNegativeNumber(measuredIssueMap.get(String(productName || '').trim().toLowerCase()));
                 }
             }
 
