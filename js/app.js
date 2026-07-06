@@ -8061,13 +8061,15 @@ async function loadAuditReportData(startDate, endDate) {
         receiptsResult,
         supplyReceiptsResult,
         transfersResult,
-        debtsResult
+        debtsResult,
+        rangedExpensesResult
     ] = await Promise.all([
         repositories.getShiftReportsByRange(scope, startDate, endDate),
         repositories.getStockReceiptsByRange(scope, startDate, endDate),
         repositories.getSupplyReceiptsByRange(scope, startDate, endDate),
         repositories.getStockTransfersByRange(scope, startDate, endDate),
-        repositories.getDebtsByRange(scope, startDate, endDate)
+        repositories.getDebtsByRange(scope, startDate, endDate),
+        repositories.getExpensesByRange(scope, startDate, endDate)
     ]);
 
     if (shiftsResult.error) throw shiftsResult.error;
@@ -8075,6 +8077,7 @@ async function loadAuditReportData(startDate, endDate) {
     if (supplyReceiptsResult.error) throw supplyReceiptsResult.error;
     if (transfersResult.error) throw transfersResult.error;
     if (debtsResult.error) throw debtsResult.error;
+    if (rangedExpensesResult.error) throw rangedExpensesResult.error;
 
     const closedShifts = annotateShiftsForDisplay(
         (shiftsResult.data || []).filter((shift) => shift.total_sales !== null),
@@ -8083,13 +8086,29 @@ async function loadAuditReportData(startDate, endDate) {
 
     const referenceData = await referenceDataPromise;
     let shiftInventory = [];
+    let shiftStockValuations = [];
+    const mergedExpenses = new Map((rangedExpensesResult.data || []).map((row) => [String(row.id || ''), row]));
     if (closedShifts.length) {
+        const shiftIds = closedShifts.map((shift) => shift.id);
         const shiftInventoryResult = await repositories.getShiftInventoryForShiftIds(
             scope,
-            closedShifts.map((shift) => shift.id)
+            shiftIds
         );
         if (shiftInventoryResult.error) throw shiftInventoryResult.error;
         shiftInventory = shiftInventoryResult.data || [];
+
+        const [expensesByShiftResult, shiftStockValuationResult] = await Promise.all([
+            repositories.getExpensesByShiftIds(scope, shiftIds),
+            repositories.getShiftStockValuationsForShiftIds(scope, shiftIds)
+        ]);
+        if (expensesByShiftResult.error) throw expensesByShiftResult.error;
+        if (shiftStockValuationResult.error) throw shiftStockValuationResult.error;
+
+        (expensesByShiftResult.data || []).forEach((row) => {
+            if (!row?.id) return;
+            mergedExpenses.set(String(row.id), row);
+        });
+        shiftStockValuations = shiftStockValuationResult.data || [];
     }
 
     return {
@@ -8098,10 +8117,12 @@ async function loadAuditReportData(startDate, endDate) {
         supplyReceipts: supplyReceiptsResult.data || [],
         stockTransfers: transfersResult.data || [],
         debts: debtsResult.data || [],
+        expenses: [...mergedExpenses.values()],
         products: referenceData.products,
         recipes: referenceData.recipes,
         rawMaterials: referenceData.rawMaterials,
-        shiftInventory
+        shiftInventory,
+        shiftStockValuations
     };
 }
 
@@ -8907,6 +8928,24 @@ function buildKitchenVsSalesReport(data) {
 }
 
 function buildProfitLossReport(data) {
+    const shifts = [...(data.shifts || [])]
+        .filter((shift) => shift?.id)
+        .sort((left, right) => new Date(left.created_at).getTime() - new Date(right.created_at).getTime());
+    const branchWindows = new Map();
+    shifts.forEach((shift) => {
+        const branchKey = String(shift.branch_id || 'no-branch');
+        const existing = branchWindows.get(branchKey);
+        if (!existing) {
+            branchWindows.set(branchKey, { first: shift, last: shift });
+            return;
+        }
+
+        existing.last = shift;
+    });
+    const openingShiftIds = new Set([...branchWindows.values()].map((row) => String(row.first.id)));
+    const closingShiftIds = new Set([...branchWindows.values()].map((row) => String(row.last.id)));
+    const firstShiftValuations = (data.shiftStockValuations || []).filter((row) => openingShiftIds.has(String(row.shift_id)));
+    const lastShiftValuations = (data.shiftStockValuations || []).filter((row) => closingShiftIds.has(String(row.shift_id)));
     const grouped = new Map();
     const getOrCreateRow = (label) => {
         const key = String(label || '').trim().toLowerCase();
@@ -8915,8 +8954,11 @@ function buildProfitLossReport(data) {
 
         const created = {
             item: label,
-            qtyBought: 0,
-            totalCost: 0,
+            openingValue: 0,
+            receivedCost: 0,
+            closingValue: 0,
+            stockCostUsed: 0,
+            expenseCost: 0,
             qtySold: 0,
             totalSale: 0,
             diff: 0,
@@ -8930,8 +8972,11 @@ function buildProfitLossReport(data) {
     const totalSales = (data.shifts || []).reduce((sum, shift) => sum + toNumber(shift.total_sales), 0);
     const itemsReceivedCost = (data.stockReceipts || []).reduce((sum, row) => sum + toNumber(row.total_received_cost), 0);
     const suppliesReceivedCost = (data.supplyReceipts || []).reduce((sum, row) => sum + toNumber(row.total_received_cost), 0);
+    const openingStockValue = firstShiftValuations.reduce((sum, row) => sum + toNumber(row.opening_total_value), 0);
+    const closingStockValue = lastShiftValuations.reduce((sum, row) => sum + toNumber(row.closing_total_value), 0);
     const expenses = (data.expenses || []).reduce((sum, row) => sum + toNumber(row.amount), 0);
-    const totalSpend = itemsReceivedCost + suppliesReceivedCost + expenses;
+    const stockCostUsed = openingStockValue + itemsReceivedCost + suppliesReceivedCost - closingStockValue;
+    const totalSpend = stockCostUsed + expenses;
     const profitLoss = totalSales - totalSpend;
     const productMap = new Map((data.products || []).map((product) => [String(product.id), product]));
     const productByNameMap = new Map((data.products || []).map((product) => [
@@ -8939,11 +8984,21 @@ function buildProfitLossReport(data) {
         product
     ]));
 
+    firstShiftValuations.forEach((row) => {
+        const item = row.stock_category === 'raw'
+            ? getDisplayMaterialName(row.item_name_snapshot || 'Stock Item')
+            : (String(row.item_name_snapshot || 'Supply Item').trim() || 'Supply Item');
+        const entry = getOrCreateRow(item);
+        entry.openingValue += toNumber(row.opening_total_value);
+        if (!entry.linkedProduct) {
+            entry.linkedProduct = productByNameMap.get(String(item).trim().toLowerCase()) || null;
+        }
+    });
+
     (data.stockReceipts || []).forEach((row) => {
         const item = getDisplayMaterialName(row.material_name || 'Stock Item');
         const entry = getOrCreateRow(item);
-        entry.qtyBought += toNumber(row.qty_received);
-        entry.totalCost += toNumber(row.total_received_cost);
+        entry.receivedCost += toNumber(row.total_received_cost);
         if (!entry.linkedProduct) {
             entry.linkedProduct = productByNameMap.get(String(item).trim().toLowerCase()) || null;
         }
@@ -8952,8 +9007,18 @@ function buildProfitLossReport(data) {
     (data.supplyReceipts || []).forEach((row) => {
         const item = String(row.item_name || 'Supply Item').trim() || 'Supply Item';
         const entry = getOrCreateRow(item);
-        entry.qtyBought += toNumber(row.qty_received);
-        entry.totalCost += toNumber(row.total_received_cost);
+        entry.receivedCost += toNumber(row.total_received_cost);
+        if (!entry.linkedProduct) {
+            entry.linkedProduct = productByNameMap.get(String(item).trim().toLowerCase()) || null;
+        }
+    });
+
+    lastShiftValuations.forEach((row) => {
+        const item = row.stock_category === 'raw'
+            ? getDisplayMaterialName(row.item_name_snapshot || 'Stock Item')
+            : (String(row.item_name_snapshot || 'Supply Item').trim() || 'Supply Item');
+        const entry = getOrCreateRow(item);
+        entry.closingValue += toNumber(row.closing_total_value);
         if (!entry.linkedProduct) {
             entry.linkedProduct = productByNameMap.get(String(item).trim().toLowerCase()) || null;
         }
@@ -8962,8 +9027,7 @@ function buildProfitLossReport(data) {
     (data.expenses || []).forEach((row) => {
         const label = `Expense: ${String(row.description || 'General Expense').trim() || 'General Expense'}`;
         const entry = getOrCreateRow(label);
-        entry.qtyBought += toNumber(row.qty);
-        entry.totalCost += toNumber(row.amount);
+        entry.expenseCost += toNumber(row.amount);
         entry.rowType = 'expense';
     });
 
@@ -8983,7 +9047,9 @@ function buildProfitLossReport(data) {
     const detailRows = [...grouped.values()]
         .map((row) => ({
             ...row,
-            diff: row.totalSale - row.totalCost
+            stockCostUsed: row.openingValue + row.receivedCost - row.closingValue,
+            totalCost: row.openingValue + row.receivedCost - row.closingValue + row.expenseCost,
+            diff: row.totalSale - (row.openingValue + row.receivedCost - row.closingValue + row.expenseCost)
         }))
         .sort((left, right) => {
             const leftHasProduct = Boolean(left.linkedProduct);
@@ -9003,32 +9069,39 @@ function buildProfitLossReport(data) {
             return String(left.item || '').localeCompare(String(right.item || ''), undefined, { sensitivity: 'base' });
         });
 
-    const totalQtyBought = detailRows.reduce((sum, row) => sum + row.qtyBought, 0);
     const totalQtySold = detailRows.reduce((sum, row) => sum + row.qtySold, 0);
+    const hasStockSnapshots = firstShiftValuations.length > 0 || lastShiftValuations.length > 0;
 
     return {
         title: 'Estimated Profit / Loss',
         summary: [
             { label: 'Total Sales', value: `KES ${formatMoney(totalSales)}` },
+            { label: 'Opening Stock Value', value: `KES ${formatMoney(openingStockValue)}` },
             { label: 'Items Received Cost', value: `KES ${formatMoney(itemsReceivedCost)}` },
             { label: 'Supplies Received Cost', value: `KES ${formatMoney(suppliesReceivedCost)}` },
-            { label: 'Expenses', value: `KES ${formatMoney(expenses)}` },
+            { label: 'Closing Stock Value', value: `KES ${formatMoney(closingStockValue)}` },
+            { label: 'Stock Cost Used', value: `KES ${formatMoney(stockCostUsed)}` },
+            { label: 'Other Expenses', value: `KES ${formatMoney(expenses)}` },
             { label: 'Total Spend', value: `KES ${formatMoney(totalSpend)}` },
             { label: 'Profit / Loss', value: `KES ${formatMoney(profitLoss)}`, style: getVarianceDisplayStyle(profitLoss) }
         ],
         columns: [
-            { key: 'item', label: 'Item', width: '34%' },
-            { key: 'qty_bought', label: 'Qty Bought', align: 'right', width: '12%' },
-            { key: 'total_cost', label: 'Total Cost', align: 'right', width: '14%' },
-            { key: 'qty_sold', label: 'Qty Sold', align: 'right', width: '12%' },
-            { key: 'total_sale', label: 'Total Sale', align: 'right', width: '14%' },
-            { key: 'diff', label: 'Diff', align: 'right', width: '14%' }
+            { key: 'item', label: 'Item', width: '25%' },
+            { key: 'opening_value', label: 'Opening Value', align: 'right', width: '12%' },
+            { key: 'received_cost', label: 'Received Cost', align: 'right', width: '12%' },
+            { key: 'closing_value', label: 'Closing Value', align: 'right', width: '12%' },
+            { key: 'total_cost', label: 'Net Cost Used', align: 'right', width: '12%' },
+            { key: 'qty_sold', label: 'Qty Sold', align: 'right', width: '9%' },
+            { key: 'total_sale', label: 'Total Sale', align: 'right', width: '9%' },
+            { key: 'diff', label: 'Diff', align: 'right', width: '9%' }
         ],
         tableLayout: 'fixed',
         rows: [
             ...detailRows.map((row) => ({
                 item: row.item,
-                qty_bought: formatQuantity(row.qtyBought, 4),
+                opening_value: row.openingValue.toLocaleString(),
+                received_cost: row.receivedCost.toLocaleString(),
+                closing_value: row.closingValue.toLocaleString(),
                 total_cost: row.totalCost.toLocaleString(),
                 qty_sold: formatQuantity(row.qtySold, 4),
                 total_sale: row.totalSale.toLocaleString(),
@@ -9036,7 +9109,9 @@ function buildProfitLossReport(data) {
             })),
             {
                 item: 'TOTAL',
-                qty_bought: formatQuantity(totalQtyBought, 4),
+                opening_value: openingStockValue.toLocaleString(),
+                received_cost: (itemsReceivedCost + suppliesReceivedCost).toLocaleString(),
+                closing_value: closingStockValue.toLocaleString(),
                 total_cost: totalSpend.toLocaleString(),
                 qty_sold: formatQuantity(totalQtySold, 4),
                 total_sale: totalSales.toLocaleString(),
@@ -9045,8 +9120,12 @@ function buildProfitLossReport(data) {
         ],
         notes: [
             'This report uses Total Sales minus Total Spend for the selected period.',
-            'Total Spend is calculated as stock item receipts plus supplies received plus recorded expense rows.',
-            'Expense rows are shown as spend-only lines with zero sales so the detail table still reconciles to the summary.',
+            'Stock Cost Used is calculated as Opening Stock Value plus stock received costs minus Closing Stock Value.',
+            'Total Spend is calculated as Stock Cost Used plus recorded expense rows.',
+            'Expense rows are shown as spend-only lines so the detail table still reconciles to the summary.',
+            hasStockSnapshots
+                ? 'Opening and closing stock values come from shift stock valuation snapshots captured at shift boundaries.'
+                : 'No shift stock valuation snapshots were found for this period, so opening and closing stock values are zero.',
             'Loss appears as a negative figure and profit appears as a positive figure.'
         ]
     };

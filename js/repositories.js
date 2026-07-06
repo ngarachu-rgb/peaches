@@ -2,6 +2,7 @@ const TABLES_WITH_BRANCH = new Set([
     'inventory',
     'main_store',
     'shift_store_checks',
+    'shift_stock_valuations',
     'supply_items',
     'supply_store',
     'supply_receipts',
@@ -21,6 +22,7 @@ const BRANCH_READY_TABLES = new Set([
     'shifts',
     'main_store',
     'shift_store_checks',
+    'shift_stock_valuations',
     'supply_items',
     'supply_store',
     'supply_receipts',
@@ -91,6 +93,23 @@ const LEGACY_SHIFT_STORE_CHECK_COLUMNS = [
     'expected_qty',
     'variance_qty',
     'notes',
+    'created_at',
+    'updated_at'
+].join(', ');
+
+const SHIFT_STOCK_VALUATION_COLUMNS = [
+    'id',
+    'shift_id',
+    'stock_category',
+    'source_item_id',
+    'item_name_snapshot',
+    'unit_snapshot',
+    'opening_qty',
+    'opening_unit_cost',
+    'opening_total_value',
+    'closing_qty',
+    'closing_unit_cost',
+    'closing_total_value',
     'created_at',
     'updated_at'
 ].join(', ');
@@ -296,6 +315,33 @@ function sanitizeShiftStoreCheckPayload(payload = {}) {
         'expected_qty',
         'variance_qty',
         'notes',
+        'updated_at'
+    ]);
+
+    const nextPayload = {};
+    Object.entries(payload).forEach(([key, value]) => {
+        if (allowedKeys.has(key)) {
+            nextPayload[key] = value;
+        }
+    });
+
+    return nextPayload;
+}
+
+function sanitizeShiftStockValuationPayload(payload = {}) {
+    const allowedKeys = new Set([
+        'id',
+        'shift_id',
+        'stock_category',
+        'source_item_id',
+        'item_name_snapshot',
+        'unit_snapshot',
+        'opening_qty',
+        'opening_unit_cost',
+        'opening_total_value',
+        'closing_qty',
+        'closing_unit_cost',
+        'closing_total_value',
         'updated_at'
     ]);
 
@@ -1091,6 +1137,58 @@ export function createRepositories(supabase) {
                 }
             ));
             return supabase.from('shift_store_checks').upsert(payload, { onConflict: 'shift_id,material_id' });
+        },
+
+        async getShiftStockValuations(context, shiftId) {
+            const query = applyScope(
+                supabase
+                    .from('shift_stock_valuations')
+                    .select(selectColumns('shift_stock_valuations', SHIFT_STOCK_VALUATION_COLUMNS))
+                    .eq('shift_id', shiftId),
+                'shift_stock_valuations',
+                context,
+                { restaurant: false }
+            );
+
+            const result = await query;
+            if (result.error && isMissingRelationError(result.error, 'shift_stock_valuations')) {
+                return { data: [], error: null };
+            }
+            return result;
+        },
+
+        async getShiftStockValuationsForShiftIds(context, shiftIds = []) {
+            if (!shiftIds.length) {
+                return { data: [], error: null };
+            }
+
+            const query = applyScope(
+                supabase
+                    .from('shift_stock_valuations')
+                    .select(selectColumns('shift_stock_valuations', SHIFT_STOCK_VALUATION_COLUMNS))
+                    .in('shift_id', shiftIds),
+                'shift_stock_valuations',
+                context,
+                { restaurant: false }
+            );
+
+            const result = await query;
+            if (result.error && isMissingRelationError(result.error, 'shift_stock_valuations')) {
+                return { data: [], error: null };
+            }
+            return result;
+        },
+
+        upsertShiftStockValuations(context, rows) {
+            const payload = rows.map((row) => attachBranchPayload(
+                'shift_stock_valuations',
+                context,
+                {
+                    restaurant_id: context?.restaurantId || null,
+                    ...sanitizeShiftStockValuationPayload(ensureRowId(row))
+                }
+            ));
+            return supabase.from('shift_stock_valuations').upsert(payload, { onConflict: 'shift_id,stock_category,source_item_id' });
         },
 
         async getRawMaterials(context) {

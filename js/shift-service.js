@@ -104,6 +104,185 @@ function getSellableUnitsForMaterial(material) {
     return stockLevel / conversionFactor;
 }
 
+function getRawMaterialStoreUnitCost(material) {
+    if (!material) return 0;
+    return toNumber(material.price) / Math.max(toNumber(material.conversion_factor), 1);
+}
+
+function buildShiftStockValuationKey(stockCategory, sourceItemId) {
+    return `${String(stockCategory || '').trim().toLowerCase()}::${String(sourceItemId || '').trim()}`;
+}
+
+async function buildShiftStockOpeningRows(context, repositories, shiftId, previousShiftId = '') {
+    const [rawMaterialsResult, supplyStoreResult, previousValuationsResult] = await Promise.all([
+        repositories.getRawMaterials(context),
+        repositories.getSupplyStore(context),
+        previousShiftId
+            ? repositories.getShiftStockValuations(context, previousShiftId)
+            : Promise.resolve({ data: [], error: null })
+    ]);
+
+    if (rawMaterialsResult.error) throw rawMaterialsResult.error;
+    if (supplyStoreResult.error) throw supplyStoreResult.error;
+    if (previousValuationsResult.error) throw previousValuationsResult.error;
+
+    const previousByKey = new Map(
+        (previousValuationsResult.data || []).map((row) => [
+            buildShiftStockValuationKey(row.stock_category, row.source_item_id),
+            row
+        ])
+    );
+    const timestamp = new Date().toISOString();
+
+    const rawRows = (rawMaterialsResult.data || []).map((material) => {
+        const key = buildShiftStockValuationKey('raw', material.id);
+        const previousRow = previousByKey.get(key);
+        const openingQty = previousRow?.closing_qty !== null && previousRow?.closing_qty !== undefined
+            ? toNumber(previousRow.closing_qty)
+            : toNumber(material.stock_level ?? material.current_stock);
+        const openingUnitCost = previousRow?.closing_unit_cost !== null && previousRow?.closing_unit_cost !== undefined
+            ? toNumber(previousRow.closing_unit_cost)
+            : getRawMaterialStoreUnitCost(material);
+
+        return {
+            shift_id: shiftId,
+            stock_category: 'raw',
+            source_item_id: material.id,
+            item_name_snapshot: material.name || 'Raw Material',
+            unit_snapshot: material.store_unit || material.buy_unit || '',
+            opening_qty: openingQty,
+            opening_unit_cost: openingUnitCost,
+            opening_total_value: openingQty * openingUnitCost,
+            closing_qty: null,
+            closing_unit_cost: null,
+            closing_total_value: null,
+            updated_at: timestamp
+        };
+    });
+
+    const supplyRows = (supplyStoreResult.data || []).map((item) => {
+        const key = buildShiftStockValuationKey('supply', item.supply_item_id);
+        const previousRow = previousByKey.get(key);
+        const openingQty = previousRow?.closing_qty !== null && previousRow?.closing_qty !== undefined
+            ? toNumber(previousRow.closing_qty)
+            : toNumber(item.stock_level ?? item.current_stock);
+        const openingUnitCost = previousRow?.closing_unit_cost !== null && previousRow?.closing_unit_cost !== undefined
+            ? toNumber(previousRow.closing_unit_cost)
+            : toNumber(item.latest_unit_cost);
+
+        return {
+            shift_id: shiftId,
+            stock_category: 'supply',
+            source_item_id: item.supply_item_id,
+            item_name_snapshot: item.item_name_snapshot || 'Supply Item',
+            unit_snapshot: item.buy_unit || '',
+            opening_qty: openingQty,
+            opening_unit_cost: openingUnitCost,
+            opening_total_value: openingQty * openingUnitCost,
+            closing_qty: null,
+            closing_unit_cost: null,
+            closing_total_value: null,
+            updated_at: timestamp
+        };
+    });
+
+    return [...rawRows, ...supplyRows];
+}
+
+async function ensureShiftStockOpeningSnapshot(context, repositories, shift, previousShiftId = '') {
+    if (!shift?.id) {
+        return [];
+    }
+
+    const existingResult = await repositories.getShiftStockValuations(context, shift.id);
+    if (existingResult.error) throw existingResult.error;
+
+    const existingRows = existingResult.data || [];
+    const existingByKey = new Map(
+        existingRows.map((row) => [buildShiftStockValuationKey(row.stock_category, row.source_item_id), row])
+    );
+
+    const openingRows = await buildShiftStockOpeningRows(context, repositories, shift.id, previousShiftId);
+    const missingRows = openingRows.filter((row) => !existingByKey.has(buildShiftStockValuationKey(row.stock_category, row.source_item_id)));
+    if (missingRows.length > 0) {
+        const upsertResult = await repositories.upsertShiftStockValuations(context, missingRows);
+        if (upsertResult.error) throw upsertResult.error;
+    }
+
+    const refreshedResult = await repositories.getShiftStockValuations(context, shift.id);
+    if (refreshedResult.error) throw refreshedResult.error;
+    return refreshedResult.data || [];
+}
+
+async function buildShiftStockClosingRows(context, repositories, shiftId) {
+    const [existingResult, rawMaterialsResult, supplyStoreResult] = await Promise.all([
+        repositories.getShiftStockValuations(context, shiftId),
+        repositories.getRawMaterials(context),
+        repositories.getSupplyStore(context)
+    ]);
+
+    if (existingResult.error) throw existingResult.error;
+    if (rawMaterialsResult.error) throw rawMaterialsResult.error;
+    if (supplyStoreResult.error) throw supplyStoreResult.error;
+
+    const existingByKey = new Map(
+        (existingResult.data || []).map((row) => [buildShiftStockValuationKey(row.stock_category, row.source_item_id), row])
+    );
+    const timestamp = new Date().toISOString();
+
+    const rawRows = (rawMaterialsResult.data || []).map((material) => {
+        const key = buildShiftStockValuationKey('raw', material.id);
+        const existingRow = existingByKey.get(key);
+        const openingQty = toNumber(existingRow?.opening_qty);
+        const openingUnitCost = toNumber(existingRow?.opening_unit_cost);
+        const closingQty = toNumber(material.stock_level ?? material.current_stock);
+        const closingUnitCost = getRawMaterialStoreUnitCost(material);
+
+        return {
+            id: existingRow?.id || undefined,
+            shift_id: shiftId,
+            stock_category: 'raw',
+            source_item_id: material.id,
+            item_name_snapshot: material.name || existingRow?.item_name_snapshot || 'Raw Material',
+            unit_snapshot: material.store_unit || material.buy_unit || existingRow?.unit_snapshot || '',
+            opening_qty: openingQty,
+            opening_unit_cost: openingUnitCost,
+            opening_total_value: openingQty * openingUnitCost,
+            closing_qty: closingQty,
+            closing_unit_cost: closingUnitCost,
+            closing_total_value: closingQty * closingUnitCost,
+            updated_at: timestamp
+        };
+    });
+
+    const supplyRows = (supplyStoreResult.data || []).map((item) => {
+        const key = buildShiftStockValuationKey('supply', item.supply_item_id);
+        const existingRow = existingByKey.get(key);
+        const openingQty = toNumber(existingRow?.opening_qty);
+        const openingUnitCost = toNumber(existingRow?.opening_unit_cost);
+        const closingQty = toNumber(item.stock_level ?? item.current_stock);
+        const closingUnitCost = toNumber(item.latest_unit_cost);
+
+        return {
+            id: existingRow?.id || undefined,
+            shift_id: shiftId,
+            stock_category: 'supply',
+            source_item_id: item.supply_item_id,
+            item_name_snapshot: item.item_name_snapshot || existingRow?.item_name_snapshot || 'Supply Item',
+            unit_snapshot: item.buy_unit || existingRow?.unit_snapshot || '',
+            opening_qty: openingQty,
+            opening_unit_cost: openingUnitCost,
+            opening_total_value: openingQty * openingUnitCost,
+            closing_qty: closingQty,
+            closing_unit_cost: closingUnitCost,
+            closing_total_value: closingQty * closingUnitCost,
+            updated_at: timestamp
+        };
+    });
+
+    return [...rawRows, ...supplyRows];
+}
+
 function validateDirectSalesCloseInput({ currentShift, inventoryRows, finance }) {
     const errors = [];
 
@@ -422,6 +601,12 @@ async function closeDirectSalesShift(context, repositories, currentShift, payloa
         const { error: inventoryError } = await repositories.upsertShiftInventoryRows(context, closingRows);
         if (inventoryError) throw inventoryError;
 
+        const closingStockRows = await buildShiftStockClosingRows(context, repositories, currentShift.id);
+        if (closingStockRows.length > 0) {
+            const stockValuationResult = await repositories.upsertShiftStockValuations(context, closingStockRows);
+            if (stockValuationResult.error) throw stockValuationResult.error;
+        }
+
         const closeResult = await repositories.updateShift(currentShift.id, {
             total_sales: finance.totalSales,
             mpesa_float: finance.mpesaOpening,
@@ -479,6 +664,8 @@ async function closeDirectSalesShift(context, repositories, currentShift, payloa
 
         const { error: nextInventoryError } = await repositories.upsertShiftInventoryRows(context, nextOpeningRows);
         if (nextInventoryError) throw nextInventoryError;
+
+        await ensureShiftStockOpeningSnapshot(context, repositories, nextShift, currentShift.id);
 
         return {
             closedShift,
@@ -544,6 +731,7 @@ export async function ensureActiveShift(context, repositories) {
 
     if (openShifts?.[0]) {
         await ensureRestaurantKeyStoreChecks(context, repositories, openShifts[0]);
+        await ensureShiftStockOpeningSnapshot(context, repositories, openShifts[0]);
         return openShifts[0];
     }
 
@@ -591,6 +779,7 @@ export async function ensureActiveShift(context, repositories) {
     }
 
     await ensureRestaurantKeyStoreChecks(context, repositories, newShift, latestClosedShift?.id || '');
+    await ensureShiftStockOpeningSnapshot(context, repositories, newShift, latestClosedShift?.id || '');
 
     return newShift;
 }
@@ -1058,6 +1247,12 @@ export async function closeShiftWithCarryForward(context, repositories, currentS
             }
         }
 
+        const closingStockRows = await buildShiftStockClosingRows(context, repositories, currentShift.id);
+        if (closingStockRows.length > 0) {
+            const stockValuationResult = await repositories.upsertShiftStockValuations(context, closingStockRows);
+            if (stockValuationResult.error) throw stockValuationResult.error;
+        }
+
         const closeResult = await repositories.updateShift(currentShift.id, {
             total_sales: finance.totalSales,
             mpesa_float: finance.mpesaOpening,
@@ -1127,6 +1322,8 @@ export async function closeShiftWithCarryForward(context, repositories, currentS
             const nextCheckUpsertResult = await repositories.upsertShiftStoreChecks(context, nextCheckRows);
             if (nextCheckUpsertResult.error) throw nextCheckUpsertResult.error;
         }
+
+        await ensureShiftStockOpeningSnapshot(context, repositories, nextShift, currentShift.id);
 
         return {
             closedShift,
