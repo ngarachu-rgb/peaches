@@ -460,7 +460,19 @@ function isMissingColumnError(error, tableNameOrColumnName, columnName = '') {
 
 function isMissingRelationError(error, relationName) {
     const message = String(error?.message || '').toLowerCase();
-    return message.includes(`relation "${String(relationName || '').toLowerCase()}" does not exist`);
+    const targetRelation = String(relationName || '').toLowerCase();
+
+    return (
+        message.includes(`relation "${targetRelation}" does not exist`) ||
+        (
+            message.includes(`could not find the table 'public.${targetRelation}'`) &&
+            message.includes('schema cache')
+        ) ||
+        (
+            message.includes(`could not find the table '${targetRelation}'`) &&
+            message.includes('schema cache')
+        )
+    );
 }
 
 function isForeignKeyConstraintError(error, constraintName) {
@@ -1179,7 +1191,7 @@ export function createRepositories(supabase) {
             return result;
         },
 
-        upsertShiftStockValuations(context, rows) {
+        async upsertShiftStockValuations(context, rows) {
             const payload = rows.map((row) => attachBranchPayload(
                 'shift_stock_valuations',
                 context,
@@ -1188,7 +1200,15 @@ export function createRepositories(supabase) {
                     ...sanitizeShiftStockValuationPayload(ensureRowId(row))
                 }
             ));
-            return supabase.from('shift_stock_valuations').upsert(payload, { onConflict: 'shift_id,stock_category,source_item_id' });
+            const result = await supabase
+                .from('shift_stock_valuations')
+                .upsert(payload, { onConflict: 'shift_id,stock_category,source_item_id' });
+
+            if (result.error && isMissingRelationError(result.error, 'shift_stock_valuations')) {
+                return { data: [], error: null };
+            }
+
+            return result;
         },
 
         async getRawMaterials(context) {
