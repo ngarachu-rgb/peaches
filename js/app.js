@@ -8947,6 +8947,23 @@ function buildProfitLossReport(data) {
     const firstShiftValuations = (data.shiftStockValuations || []).filter((row) => openingShiftIds.has(String(row.shift_id)));
     const lastShiftValuations = (data.shiftStockValuations || []).filter((row) => closingShiftIds.has(String(row.shift_id)));
     const grouped = new Map();
+    const formatAuditQuantity = (qty, units) => {
+        if (!Number.isFinite(qty) || Math.abs(qty) <= 0) {
+            return '--';
+        }
+
+        const normalizedUnits = [...units].filter(Boolean);
+        const formattedQty = formatQuantity(qty, 4);
+        if (!normalizedUnits.length) {
+            return formattedQty;
+        }
+
+        if (normalizedUnits.length === 1) {
+            return `${formattedQty} ${normalizedUnits[0]}`;
+        }
+
+        return `${formattedQty} (mixed units)`;
+    };
     const getOrCreateRow = (label) => {
         const key = String(label || '').trim().toLowerCase();
         const existing = grouped.get(key);
@@ -8954,14 +8971,18 @@ function buildProfitLossReport(data) {
 
         const created = {
             item: label,
+            openingQty: 0,
             openingValue: 0,
             receivedCost: 0,
+            closingQty: 0,
             closingValue: 0,
             stockCostUsed: 0,
             expenseCost: 0,
             qtySold: 0,
             totalSale: 0,
             diff: 0,
+            openingUnits: new Set(),
+            closingUnits: new Set(),
             linkedProduct: null,
             rowType: 'item'
         };
@@ -8989,7 +9010,11 @@ function buildProfitLossReport(data) {
             ? getDisplayMaterialName(row.item_name_snapshot || 'Stock Item')
             : (String(row.item_name_snapshot || 'Supply Item').trim() || 'Supply Item');
         const entry = getOrCreateRow(item);
+        entry.openingQty += toNumber(row.opening_qty);
         entry.openingValue += toNumber(row.opening_total_value);
+        if (row.unit_snapshot) {
+            entry.openingUnits.add(String(row.unit_snapshot).trim());
+        }
         if (!entry.linkedProduct) {
             entry.linkedProduct = productByNameMap.get(String(item).trim().toLowerCase()) || null;
         }
@@ -9018,7 +9043,11 @@ function buildProfitLossReport(data) {
             ? getDisplayMaterialName(row.item_name_snapshot || 'Stock Item')
             : (String(row.item_name_snapshot || 'Supply Item').trim() || 'Supply Item');
         const entry = getOrCreateRow(item);
+        entry.closingQty += toNumber(row.closing_qty);
         entry.closingValue += toNumber(row.closing_total_value);
+        if (row.unit_snapshot) {
+            entry.closingUnits.add(String(row.unit_snapshot).trim());
+        }
         if (!entry.linkedProduct) {
             entry.linkedProduct = productByNameMap.get(String(item).trim().toLowerCase()) || null;
         }
@@ -9087,9 +9116,9 @@ function buildProfitLossReport(data) {
         ],
         columns: [
             { key: 'item', label: 'Item', width: '25%' },
-            { key: 'opening_value', label: 'Opening Value', align: 'right', width: '12%' },
+            { key: 'opening_qty', label: 'Opening Qty', align: 'right', width: '12%' },
             { key: 'received_cost', label: 'Received Cost', align: 'right', width: '12%' },
-            { key: 'closing_value', label: 'Closing Value', align: 'right', width: '12%' },
+            { key: 'closing_qty', label: 'Closing Qty', align: 'right', width: '12%' },
             { key: 'total_cost', label: 'Net Cost Used', align: 'right', width: '12%' },
             { key: 'qty_sold', label: 'Qty Sold', align: 'right', width: '9%' },
             { key: 'total_sale', label: 'Total Sale', align: 'right', width: '9%' },
@@ -9099,9 +9128,9 @@ function buildProfitLossReport(data) {
         rows: [
             ...detailRows.map((row) => ({
                 item: row.item,
-                opening_value: row.openingValue.toLocaleString(),
+                opening_qty: formatAuditQuantity(row.openingQty, row.openingUnits),
                 received_cost: row.receivedCost.toLocaleString(),
-                closing_value: row.closingValue.toLocaleString(),
+                closing_qty: formatAuditQuantity(row.closingQty, row.closingUnits),
                 total_cost: row.totalCost.toLocaleString(),
                 qty_sold: formatQuantity(row.qtySold, 4),
                 total_sale: row.totalSale.toLocaleString(),
@@ -9109,9 +9138,9 @@ function buildProfitLossReport(data) {
             })),
             {
                 item: 'TOTAL',
-                opening_value: openingStockValue.toLocaleString(),
+                opening_qty: '--',
                 received_cost: (itemsReceivedCost + suppliesReceivedCost).toLocaleString(),
-                closing_value: closingStockValue.toLocaleString(),
+                closing_qty: '--',
                 total_cost: totalSpend.toLocaleString(),
                 qty_sold: formatQuantity(totalQtySold, 4),
                 total_sale: totalSales.toLocaleString(),
@@ -9122,6 +9151,7 @@ function buildProfitLossReport(data) {
             'This report uses Total Sales minus Total Spend for the selected period.',
             'Stock Cost Used is calculated as Opening Stock Value plus stock received costs minus Closing Stock Value.',
             'Total Spend is calculated as Stock Cost Used plus recorded expense rows.',
+            'Opening Qty and Closing Qty are shown for audit visibility only and do not change the report calculations.',
             'Expense rows are shown as spend-only lines so the detail table still reconciles to the summary.',
             hasStockSnapshots
                 ? 'Opening and closing stock values come from shift stock valuation snapshots captured at shift boundaries.'
