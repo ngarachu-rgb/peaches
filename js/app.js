@@ -8793,6 +8793,80 @@ function buildSalesSummaryReport(data) {
     };
 }
 
+function buildStockMovementReport(data) {
+    const productMap = new Map((data.products || []).map((product) => [String(product.id), product]));
+    const shiftMap = new Map((data.shifts || []).map((shift) => [String(shift.id), shift]));
+    const showBranch = isAllBranchesReportScope();
+    const grouped = new Map();
+
+    (data.shiftInventory || []).forEach((row) => {
+        const shift = shiftMap.get(String(row.shift_id));
+        const product = productMap.get(String(row.product_id));
+        if (!shift || !product) return;
+
+        const branchKey = showBranch ? String(shift.branch_id || 'no-branch') : 'single-branch';
+        const key = `${branchKey}::${String(row.product_id)}`;
+        const existing = grouped.get(key) || {
+            item: getDisplayProductName(product.name),
+            branch_id: shift.branch_id || '',
+            received_qty: 0,
+            sold_qty: 0,
+            balance_qty: 0,
+            latestShiftTime: 0
+        };
+
+        existing.received_qty += toNumber(row.added_today);
+        existing.sold_qty += toNumber(row.sold_qty);
+
+        const shiftTime = new Date(shift.created_at || `${shift.shift_date || ''}T00:00:00Z`).getTime();
+        if (shiftTime >= existing.latestShiftTime) {
+            existing.balance_qty = toNumber(row.close_qty);
+            existing.latestShiftTime = shiftTime;
+        }
+
+        grouped.set(key, existing);
+    });
+
+    const rows = [...grouped.values()]
+        .sort((left, right) => {
+            if (showBranch) {
+                const branchCompare = String(getBranchName(left.branch_id) || '').localeCompare(String(getBranchName(right.branch_id) || ''));
+                if (branchCompare !== 0) return branchCompare;
+            }
+
+            return compareSalesItems({ name: left.item }, { name: right.item });
+        })
+        .map((row) => ({
+            ...(showBranch ? { branch: getBranchName(row.branch_id) } : {}),
+            item: row.item,
+            received_qty: formatQuantity(row.received_qty, 4),
+            sold_qty: formatQuantity(row.sold_qty, 4),
+            balance_qty: formatQuantity(row.balance_qty, 4)
+        }));
+
+    return {
+        title: 'Stock Movement',
+        summary: [
+            { label: 'Items', value: String(rows.length) },
+            { label: 'Total Received Qty', value: formatQuantity([...grouped.values()].reduce((sum, row) => sum + row.received_qty, 0), 4) },
+            { label: 'Total Sold Qty', value: formatQuantity([...grouped.values()].reduce((sum, row) => sum + row.sold_qty, 0), 4) }
+        ],
+        columns: [
+            ...(showBranch ? [{ key: 'branch', label: 'Branch' }] : []),
+            { key: 'item', label: 'Item' },
+            { key: 'received_qty', label: 'Received Qty', align: 'right' },
+            { key: 'sold_qty', label: 'Sold Qty', align: 'right' },
+            { key: 'balance_qty', label: 'Balance', align: 'right' }
+        ],
+        rows,
+        notes: [
+            'This report is built from shift inventory records because there is no dedicated stock movement table yet.',
+            'Received Qty uses Added Today, Sold Qty uses Sold Qty, and Balance uses the latest closing quantity found in the selected period.',
+            'Balance is period-ending balance per item for the chosen date range, not a live current-stock lookup.'
+        ]
+    };
+}
+
 function buildVarianceDetailReport(data) {
     const showBranch = isAllBranchesReportScope();
     const shiftVarianceValues = data.shifts.map((shift) => {
@@ -9130,11 +9204,8 @@ function buildProfitLossReport(data) {
     const totalSales = (data.shifts || []).reduce((sum, shift) => sum + toNumber(shift.total_sales), 0);
     const itemsReceivedCost = (data.stockReceipts || []).reduce((sum, row) => sum + toNumber(row.total_received_cost), 0);
     const suppliesReceivedCost = (data.supplyReceipts || []).reduce((sum, row) => sum + toNumber(row.total_received_cost), 0);
-    const openingStockValue = firstShiftValuations.reduce((sum, row) => sum + toNumber(row.opening_total_value), 0);
-    const closingStockValue = lastShiftValuations.reduce((sum, row) => sum + toNumber(row.closing_total_value), 0);
-    const expenses = (data.expenses || []).reduce((sum, row) => sum + toNumber(row.amount), 0);
-    const stockCostUsed = openingStockValue + itemsReceivedCost + suppliesReceivedCost - closingStockValue;
-    const totalSpend = stockCostUsed + expenses;
+    const totalReceivedCost = itemsReceivedCost + suppliesReceivedCost;
+    const totalSpend = totalReceivedCost;
     const profitLoss = totalSales - totalSpend;
     const productMap = new Map((data.products || []).map((product) => [String(product.id), product]));
     const productByNameMap = new Map((data.products || []).map((product) => [
@@ -9148,7 +9219,6 @@ function buildProfitLossReport(data) {
             : (String(row.item_name_snapshot || 'Supply Item').trim() || 'Supply Item');
         const entry = getOrCreateRow(item);
         entry.openingQty += toNumber(row.opening_qty);
-        entry.openingValue += toNumber(row.opening_total_value);
         if (row.unit_snapshot) {
             entry.openingUnits.add(String(row.unit_snapshot).trim());
         }
@@ -9181,20 +9251,12 @@ function buildProfitLossReport(data) {
             : (String(row.item_name_snapshot || 'Supply Item').trim() || 'Supply Item');
         const entry = getOrCreateRow(item);
         entry.closingQty += toNumber(row.closing_qty);
-        entry.closingValue += toNumber(row.closing_total_value);
         if (row.unit_snapshot) {
             entry.closingUnits.add(String(row.unit_snapshot).trim());
         }
         if (!entry.linkedProduct) {
             entry.linkedProduct = productByNameMap.get(String(item).trim().toLowerCase()) || null;
         }
-    });
-
-    (data.expenses || []).forEach((row) => {
-        const label = `Expense: ${String(row.description || 'General Expense').trim() || 'General Expense'}`;
-        const entry = getOrCreateRow(label);
-        entry.expenseCost += toNumber(row.amount);
-        entry.rowType = 'expense';
     });
 
     (data.shiftInventory || []).forEach((row) => {
@@ -9213,9 +9275,8 @@ function buildProfitLossReport(data) {
     const detailRows = [...grouped.values()]
         .map((row) => ({
             ...row,
-            stockCostUsed: row.openingValue + row.receivedCost - row.closingValue,
-            totalCost: row.openingValue + row.receivedCost - row.closingValue + row.expenseCost,
-            diff: row.totalSale - (row.openingValue + row.receivedCost - row.closingValue + row.expenseCost)
+            totalCost: row.receivedCost,
+            diff: row.totalSale - row.receivedCost
         }))
         .sort((left, right) => {
             const leftHasProduct = Boolean(left.linkedProduct);
@@ -9225,11 +9286,6 @@ function buildProfitLossReport(data) {
             }
             if (leftHasProduct !== rightHasProduct) {
                 return leftHasProduct ? -1 : 1;
-            }
-
-            if (left.rowType !== right.rowType) {
-                if (left.rowType === 'expense') return 1;
-                if (right.rowType === 'expense') return -1;
             }
 
             return String(left.item || '').localeCompare(String(right.item || ''), undefined, { sensitivity: 'base' });
@@ -9242,12 +9298,8 @@ function buildProfitLossReport(data) {
         title: 'Estimated Profit / Loss',
         summary: [
             { label: 'Total Sales', value: `KES ${formatMoney(totalSales)}` },
-            { label: 'Opening Stock Value', value: `KES ${formatMoney(openingStockValue)}` },
             { label: 'Items Received Cost', value: `KES ${formatMoney(itemsReceivedCost)}` },
             { label: 'Supplies Received Cost', value: `KES ${formatMoney(suppliesReceivedCost)}` },
-            { label: 'Closing Stock Value', value: `KES ${formatMoney(closingStockValue)}` },
-            { label: 'Stock Cost Used', value: `KES ${formatMoney(stockCostUsed)}` },
-            { label: 'Other Expenses', value: `KES ${formatMoney(expenses)}` },
             { label: 'Total Spend', value: `KES ${formatMoney(totalSpend)}` },
             { label: 'Profit / Loss', value: `KES ${formatMoney(profitLoss)}`, style: getVarianceDisplayStyle(profitLoss) }
         ],
@@ -9286,13 +9338,11 @@ function buildProfitLossReport(data) {
         ],
         notes: [
             'This report uses Total Sales minus Total Spend for the selected period.',
-            'Stock Cost Used is calculated as Opening Stock Value plus stock received costs minus Closing Stock Value.',
-            'Total Spend is calculated as Stock Cost Used plus recorded expense rows.',
+            'Total Spend is calculated as Items Received Cost plus Supplies Received Cost.',
             'Opening Qty and Closing Qty are shown for audit visibility only and do not change the report calculations.',
-            'Expense rows are shown as spend-only lines so the detail table still reconciles to the summary.',
             hasStockSnapshots
-                ? 'Opening and closing stock values come from shift stock valuation snapshots captured at shift boundaries.'
-                : 'No shift stock valuation snapshots were found for this period, so opening and closing stock values are zero.',
+                ? 'Opening Qty and Closing Qty come from shift stock valuation snapshots captured at shift boundaries.'
+                : 'No shift stock valuation snapshots were found for this period, so opening and closing quantities are shown as --.',
             'Loss appears as a negative figure and profit appears as a positive figure.'
         ]
     };
@@ -9302,6 +9352,8 @@ function buildAuditReport(reportType, data) {
     switch (reportType) {
     case 'received-items-summary':
         return buildReceivedItemsSummaryReport(data);
+    case 'stock-movement':
+        return buildStockMovementReport(data);
     case 'raw-items-received':
         return buildRawItemsReceivedReport(data);
     case 'raw-material-balances':
