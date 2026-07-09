@@ -2234,6 +2234,19 @@ export function createRepositories(supabase) {
             );
         },
 
+        getClosedShiftsBeforeDate(context, beforeDate) {
+            return applyScope(
+                supabase
+                    .from('shifts')
+                    .select(selectColumns('shifts', LEGACY_SHIFT_COLUMNS))
+                    .not('total_sales', 'is', null)
+                    .filter('created_at', 'lt', `${beforeDate}T00:00:00Z`)
+                    .order('created_at', { ascending: false }),
+                'shifts',
+                context
+            );
+        },
+
         getDebtsByRange(context, startDate, endDate) {
             const effectiveEndDate = endDate || startDate;
             return applyScope(

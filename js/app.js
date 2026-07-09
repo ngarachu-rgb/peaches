@@ -8073,6 +8073,7 @@ async function loadAuditReportData(startDate, endDate) {
     const referenceDataPromise = getCachedAuditReferenceData(scope);
     const [
         shiftsResult,
+        previousClosedShiftsResult,
         receiptsResult,
         supplyReceiptsResult,
         transfersResult,
@@ -8080,6 +8081,7 @@ async function loadAuditReportData(startDate, endDate) {
         rangedExpensesResult
     ] = await Promise.all([
         repositories.getShiftReportsByRange(scope, startDate, endDate),
+        repositories.getClosedShiftsBeforeDate(scope, startDate),
         repositories.getStockReceiptsByRange(scope, startDate, endDate),
         repositories.getSupplyReceiptsByRange(scope, startDate, endDate),
         repositories.getStockTransfersByRange(scope, startDate, endDate),
@@ -8088,6 +8090,7 @@ async function loadAuditReportData(startDate, endDate) {
     ]);
 
     if (shiftsResult.error) throw shiftsResult.error;
+    if (previousClosedShiftsResult.error) throw previousClosedShiftsResult.error;
     if (receiptsResult.error) throw receiptsResult.error;
     if (supplyReceiptsResult.error) throw supplyReceiptsResult.error;
     if (transfersResult.error) throw transfersResult.error;
@@ -8101,16 +8104,34 @@ async function loadAuditReportData(startDate, endDate) {
 
     const referenceData = await referenceDataPromise;
     let shiftInventory = [];
+    let previousShiftInventory = [];
     let shiftStockValuations = [];
     const mergedExpenses = new Map((rangedExpensesResult.data || []).map((row) => [String(row.id || ''), row]));
+    const previousClosedByBranch = new Map();
+    (previousClosedShiftsResult.data || []).forEach((shift) => {
+        const branchKey = String(shift.branch_id || 'no-branch');
+        if (!previousClosedByBranch.has(branchKey)) {
+            previousClosedByBranch.set(branchKey, shift);
+        }
+    });
+
+    const previousShiftIds = [...previousClosedByBranch.values()].map((shift) => shift.id).filter(Boolean);
     if (closedShifts.length) {
         const shiftIds = closedShifts.map((shift) => shift.id);
-        const shiftInventoryResult = await repositories.getShiftInventoryForShiftIds(
-            scope,
-            shiftIds
-        );
+        const [shiftInventoryResult, previousShiftInventoryResult] = await Promise.all([
+            repositories.getShiftInventoryForShiftIds(
+                scope,
+                shiftIds
+            ),
+            repositories.getShiftInventoryForShiftIds(
+                scope,
+                previousShiftIds
+            )
+        ]);
         if (shiftInventoryResult.error) throw shiftInventoryResult.error;
+        if (previousShiftInventoryResult.error) throw previousShiftInventoryResult.error;
         shiftInventory = shiftInventoryResult.data || [];
+        previousShiftInventory = previousShiftInventoryResult.data || [];
 
         const [expensesByShiftResult, shiftStockValuationResult] = await Promise.all([
             repositories.getExpensesByShiftIds(scope, shiftIds),
@@ -8137,6 +8158,8 @@ async function loadAuditReportData(startDate, endDate) {
         recipes: referenceData.recipes,
         rawMaterials: referenceData.rawMaterials,
         shiftInventory,
+        previousClosedShifts: [...previousClosedByBranch.values()],
+        previousShiftInventory,
         shiftStockValuations
     };
 }
@@ -8796,8 +8819,18 @@ function buildSalesSummaryReport(data) {
 function buildStockMovementReport(data) {
     const productMap = new Map((data.products || []).map((product) => [String(product.id), product]));
     const shiftMap = new Map((data.shifts || []).map((shift) => [String(shift.id), shift]));
+    const previousShiftBranchMap = new Map((data.previousClosedShifts || []).map((shift) => [String(shift.id), shift]));
     const showBranch = isAllBranchesReportScope();
     const grouped = new Map();
+    const previousShiftMap = new Map();
+
+    (data.previousShiftInventory || []).forEach((row) => {
+        const shift = previousShiftBranchMap.get(String(row.shift_id));
+        const branchKey = showBranch
+            ? String(shift?.branch_id || row.branch_id || 'no-branch')
+            : 'single-branch';
+        previousShiftMap.set(`${branchKey}::${String(row.product_id)}`, toNumber(row.close_qty));
+    });
 
     (data.shiftInventory || []).forEach((row) => {
         const shift = shiftMap.get(String(row.shift_id));
@@ -8809,6 +8842,7 @@ function buildStockMovementReport(data) {
         const existing = grouped.get(key) || {
             item: getDisplayProductName(product.name),
             branch_id: shift.branch_id || '',
+            opening_qty: previousShiftMap.get(key) ?? 0,
             received_qty: 0,
             sold_qty: 0,
             balance_qty: 0,
@@ -8839,6 +8873,7 @@ function buildStockMovementReport(data) {
         .map((row) => ({
             ...(showBranch ? { branch: getBranchName(row.branch_id) } : {}),
             item: row.item,
+            opening_qty: formatQuantity(row.opening_qty, 4),
             received_qty: formatQuantity(row.received_qty, 4),
             sold_qty: formatQuantity(row.sold_qty, 4),
             balance_qty: formatQuantity(row.balance_qty, 4)
@@ -8848,12 +8883,14 @@ function buildStockMovementReport(data) {
         title: 'Stock Movement',
         summary: [
             { label: 'Items', value: String(rows.length) },
+            { label: 'Total Opening Qty', value: formatQuantity([...grouped.values()].reduce((sum, row) => sum + row.opening_qty, 0), 4) },
             { label: 'Total Received Qty', value: formatQuantity([...grouped.values()].reduce((sum, row) => sum + row.received_qty, 0), 4) },
             { label: 'Total Sold Qty', value: formatQuantity([...grouped.values()].reduce((sum, row) => sum + row.sold_qty, 0), 4) }
         ],
         columns: [
             ...(showBranch ? [{ key: 'branch', label: 'Branch' }] : []),
             { key: 'item', label: 'Item' },
+            { key: 'opening_qty', label: 'Opening Qty', align: 'right' },
             { key: 'received_qty', label: 'Received Qty', align: 'right' },
             { key: 'sold_qty', label: 'Sold Qty', align: 'right' },
             { key: 'balance_qty', label: 'Balance', align: 'right' }
@@ -8861,6 +8898,7 @@ function buildStockMovementReport(data) {
         rows,
         notes: [
             'This report is built from shift inventory records because there is no dedicated stock movement table yet.',
+            'Opening Qty uses the closing quantity from the most recent closed shift before the selected date range.',
             'Received Qty uses Added Today, Sold Qty uses Sold Qty, and Balance uses the latest closing quantity found in the selected period.',
             'Balance is period-ending balance per item for the chosen date range, not a live current-stock lookup.'
         ]
