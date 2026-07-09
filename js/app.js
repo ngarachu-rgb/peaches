@@ -8347,11 +8347,13 @@ function buildRawMaterialBalancesReport(data) {
     const rows = (data.rawMaterials || [])
         .map((material) => {
             const currentStock = toNumber(material.stock_level ?? material.current_stock);
+            const conversionFactor = Math.max(toNumber(material.conversion_factor), 1);
+            const currentBuyUnitQty = currentStock / conversionFactor;
             const reorderLevel = material.reorder_level === null || material.reorder_level === undefined || material.reorder_level === ''
                 ? '--'
                 : `${roundDisplayQuantityUp(material.reorder_level)} ${material.store_unit || ''}`.trim();
             const latestBuyPrice = toNumber(material.price);
-            const estimatedValue = currentStock * latestBuyPrice;
+            const estimatedValue = currentBuyUnitQty * latestBuyPrice;
             const status = getStoreStockStatus(material);
 
             return {
@@ -8409,7 +8411,7 @@ function buildRawMaterialBalancesReport(data) {
         notes: [
             'This is a live raw material stock snapshot for the selected branch scope.',
             'It shows current balances of procured raw items from main store and does not depend on the chosen date range.',
-            'Estimated Stock Value uses the latest stored buy price multiplied by current balance.'
+            'Estimated Stock Value uses the latest stored buy price multiplied by the equivalent buy-unit quantity.'
         ]
     };
 }
