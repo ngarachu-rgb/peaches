@@ -20,6 +20,7 @@ let rawImportRows = [];
 let productImportRows = [];
 let recipeImportRows = [];
 let currentAuditReport = null;
+let currentReceivedItemsDetail = null;
 let appToastTimer = null;
 let idleLogoutInterval = null;
 let idleMonitorBound = false;
@@ -2166,6 +2167,14 @@ function downloadCsv(filename, columns, rows) {
     URL.revokeObjectURL(url);
 }
 
+function sanitizeFilenamePart(value) {
+    return String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '') || 'report';
+}
+
 function getVarianceDisplayStyle(value) {
     const numericValue = toNumber(String(value ?? '').replace(/,/g, ''));
     if (numericValue < -0.009) {
@@ -2239,7 +2248,10 @@ function renderAuditReportPreview(report) {
                                   : '';
                               const align = column.align || 'left';
                               const extraStyle = column.cellStyle || '';
-                              return `<td style="${cellStyle}text-align:${align}; ${extraStyle}${varianceStyle}">${row[column.key] ?? ''}</td>`;
+                              const cellContent = typeof column.renderCell === 'function'
+                                  ? column.renderCell(row, report)
+                                  : (row[column.key] ?? '');
+                              return `<td style="${cellStyle}text-align:${align}; ${extraStyle}${varianceStyle}">${cellContent}</td>`;
                           }).join('')}
                       </tr>
                   `;
@@ -5506,9 +5518,12 @@ window.calcSalesRow = (element) => {
     persistShiftDraftSnapshot();
 };
 
-window.dismissAppModal = () => {
+window.dismissAppModal = async () => {
     if (typeof appModalState.dismissHandler === 'function') {
-        appModalState.dismissHandler();
+        await appModalState.dismissHandler();
+        if (appModalState.sourceId || appModalState.mode === 'prompt') {
+            closeAppModalImmediate();
+        }
         return;
     }
 
@@ -8182,6 +8197,128 @@ function buildRawItemsReceivedReport(data) {
     };
 }
 
+function buildReceivedItemsSummaryReport(data) {
+    const showBranch = isAllBranchesReportScope();
+    const grouped = new Map();
+
+    data.stockReceipts.forEach((row) => {
+        const dateKey = String(row.created_at || '').slice(0, 10);
+        if (!dateKey) return;
+
+        const existing = grouped.get(dateKey) || {
+            dateKey,
+            totalValue: 0,
+            totalBuyQty: 0,
+            totalStoreQty: 0,
+            receiptRows: 0,
+            branches: new Set(),
+            details: []
+        };
+
+        const receivedCost = toNumber(row.total_received_cost ?? (toNumber(row.qty_received) * toNumber(row.buy_unit_price)));
+        const postedStoreQty = toNumber(row.qty_posted_store ?? (toNumber(row.qty_received) * Math.max(toNumber(row.conversion_factor), 1)));
+        existing.totalValue += receivedCost;
+        existing.totalBuyQty += toNumber(row.qty_received);
+        existing.totalStoreQty += postedStoreQty;
+        existing.receiptRows += 1;
+        if (row.branch_id) {
+            existing.branches.add(String(row.branch_id));
+        }
+        existing.details.push(row);
+        grouped.set(dateKey, existing);
+    });
+
+    const sortedGroups = [...grouped.values()].sort((left, right) => right.dateKey.localeCompare(left.dateKey));
+    const totalReceivedValue = sortedGroups.reduce((sum, row) => sum + row.totalValue, 0);
+    const totalReceiptRows = sortedGroups.reduce((sum, row) => sum + row.receiptRows, 0);
+
+    const detailColumns = [
+        { key: 'date_time', label: 'Received At' },
+        ...(showBranch ? [{ key: 'branch', label: 'Branch' }] : []),
+        { key: 'material_name', label: 'Material' },
+        { key: 'qty_received', label: 'Received Qty' },
+        { key: 'received_cost', label: 'Received Cost' },
+        { key: 'qty_posted_store', label: 'Store Qty Posted' },
+        { key: 'received_by', label: 'Received By' }
+    ];
+
+    const detailMap = Object.fromEntries(sortedGroups.map((group) => {
+        const detailRows = group.details
+            .slice()
+            .sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime())
+            .map((row) => ({
+                date_time: formatDateTimeDisplay(row.created_at),
+                ...(showBranch ? { branch: getBranchName(row.branch_id) } : {}),
+                material_name: getDisplayMaterialName(row.material_name),
+                qty_received: `${formatQuantity(toNumber(row.qty_received), 4)} ${row.buy_unit || ''}`.trim(),
+                received_cost: `KES ${formatMoney(row.total_received_cost ?? (toNumber(row.qty_received) * toNumber(row.buy_unit_price)))}`,
+                qty_posted_store: `${formatQuantity(toNumber(row.qty_posted_store ?? (toNumber(row.qty_received) * Math.max(toNumber(row.conversion_factor), 1))), 4)} ${row.store_unit || ''}`.trim(),
+                received_by: row.received_by || 'Staff'
+            }));
+
+        return [group.dateKey, {
+            title: `Received Items Details - ${formatLongDate(`${group.dateKey}T00:00:00`)}`,
+            filenameDate: group.dateKey,
+            columns: detailColumns,
+            rows: detailRows,
+            summary: [
+                { label: 'Receipt Rows', value: String(group.receiptRows) },
+                { label: 'Total Received Value', value: `KES ${formatMoney(group.totalValue)}` },
+                { label: 'Total Buy Qty', value: formatQuantity(group.totalBuyQty, 4) },
+                { label: 'Total Store Qty', value: formatQuantity(group.totalStoreQty, 4) }
+            ]
+        }];
+    }));
+
+    return {
+        title: 'Received Items Summary',
+        summary: [
+            { label: 'Dates With Receipts', value: String(sortedGroups.length) },
+            { label: 'Receipt Rows', value: String(totalReceiptRows) },
+            { label: 'Total Received Value', value: `KES ${formatMoney(totalReceivedValue)}` }
+        ],
+        columns: [
+            {
+                key: 'date',
+                label: 'Date',
+                renderCell: (row) => (
+                    `<button type="button" onclick="openReceivedItemsSummaryDetail('${escapeHtml(row.date_key)}')" ` +
+                    `style="border:none; background:none; color:#2563eb; font-weight:700; cursor:pointer; padding:0; text-decoration:underline;">` +
+                    `${escapeHtml(row.date || '--')}</button>`
+                )
+            },
+            ...(showBranch ? [{ key: 'branch_count', label: 'Branches', align: 'right' }] : []),
+            { key: 'receipt_rows', label: 'Receipt Rows', align: 'right' },
+            { key: 'total_buy_qty', label: 'Total Buy Qty', align: 'right' },
+            { key: 'total_store_qty', label: 'Total Store Qty', align: 'right' },
+            { key: 'total_value', label: 'Total Received Value', align: 'right' }
+        ],
+        rows: sortedGroups.map((group) => ({
+            date_key: group.dateKey,
+            date: formatLongDate(`${group.dateKey}T00:00:00`),
+            ...(showBranch ? { branch_count: String(group.branches.size || 1) } : {}),
+            receipt_rows: String(group.receiptRows),
+            total_buy_qty: formatQuantity(group.totalBuyQty, 4),
+            total_store_qty: formatQuantity(group.totalStoreQty, 4),
+            total_value: `KES ${formatMoney(group.totalValue)}`
+        })),
+        exportRows: sortedGroups.map((group) => ({
+            date: formatLongDate(`${group.dateKey}T00:00:00`),
+            ...(showBranch ? { branch_count: String(group.branches.size || 1) } : {}),
+            receipt_rows: String(group.receiptRows),
+            total_buy_qty: formatQuantity(group.totalBuyQty, 4),
+            total_store_qty: formatQuantity(group.totalStoreQty, 4),
+            total_value: `KES ${formatMoney(group.totalValue)}`
+        })),
+        detailMap,
+        notes: [
+            'Each row shows one receipt date and the total value of items received on that date.',
+            'Click a date to open the full list of items received for that day.',
+            'The detail popup can be exported as a CSV file for Excel.'
+        ]
+    };
+}
+
 function buildRawMaterialBalancesReport(data) {
     const showBranch = isAllBranchesReportScope();
     const rows = (data.rawMaterials || [])
@@ -9163,6 +9300,8 @@ function buildProfitLossReport(data) {
 
 function buildAuditReport(reportType, data) {
     switch (reportType) {
+    case 'received-items-summary':
+        return buildReceivedItemsSummaryReport(data);
     case 'raw-items-received':
         return buildRawItemsReceivedReport(data);
     case 'raw-material-balances':
@@ -9197,6 +9336,107 @@ function buildAuditReport(reportType, data) {
         throw new Error('Unsupported report type selected.');
     }
 }
+
+function renderReceivedItemsDetailModal(detail) {
+    const host = document.getElementById('receivedItemsDetailModalCard');
+    const summaryNode = document.getElementById('receivedItemsDetailSummary');
+    const tableNode = document.getElementById('receivedItemsDetailTableWrap');
+    if (!host || !summaryNode || !tableNode) return;
+
+    host.dataset.detailDateKey = detail?.filenameDate || '';
+    document.getElementById('receivedItemsDetailMeta').innerText = detail?.title || 'Received Items Details';
+    summaryNode.innerHTML = renderAuditReportSummary(detail?.summary || []);
+
+    if (!detail?.rows?.length) {
+        tableNode.innerHTML = '<div style="padding:16px; color:#64748b;">No receipt details were found for this date.</div>';
+        return;
+    }
+
+    tableNode.innerHTML = `
+        <div style="overflow-x:auto;">
+            <table style="width:100%; border-collapse:collapse; table-layout:auto;">
+                <thead>
+                    <tr>
+                        ${detail.columns.map((column) => `<th style="padding:12px; background:#f8fafc; color:#7092ae; text-align:${column.align || 'left'};">${column.label}</th>`).join('')}
+                    </tr>
+                </thead>
+                <tbody>
+                    ${detail.rows.map((row) => `
+                        <tr>
+                            ${detail.columns.map((column) => `<td style="padding:10px; border-bottom:1px solid #e2e8f0; text-align:${column.align || 'left'};">${row[column.key] ?? ''}</td>`).join('')}
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
+function getCurrentReceivedItemsDetail() {
+    if (currentReceivedItemsDetail?.rows?.length) {
+        return currentReceivedItemsDetail;
+    }
+
+    const host = document.getElementById('receivedItemsDetailModalCard');
+    const detailDateKey = String(host?.dataset?.detailDateKey || '').trim();
+    if (!detailDateKey || !currentAuditReport?.detailMap) {
+        return null;
+    }
+
+    const detail = currentAuditReport.detailMap[detailDateKey] || null;
+    if (detail?.rows?.length) {
+        currentReceivedItemsDetail = detail;
+        return detail;
+    }
+
+    return null;
+}
+
+window.openReceivedItemsSummaryDetail = (dateKey) => {
+    try {
+        if (!currentAuditReport?.detailMap) {
+            throw new Error('Preview the received items summary report first.');
+        }
+
+        const detail = currentAuditReport.detailMap[String(dateKey || '')];
+        if (!detail) {
+            throw new Error('No received item details were found for that date.');
+        }
+
+        currentReceivedItemsDetail = detail;
+        renderReceivedItemsDetailModal(detail);
+        openHostedModal(detail.title, 'receivedItemsDetailModalCard', () => {
+            currentReceivedItemsDetail = null;
+            const host = document.getElementById('receivedItemsDetailModalCard');
+            if (host) {
+                host.dataset.detailDateKey = '';
+            }
+        });
+    } catch (error) {
+        handleError(error, 'Failed to open received items details');
+    }
+};
+
+window.exportReceivedItemsDetailExcel = () => {
+    try {
+        requirePermission(PERMISSIONS.EXPORT_REPORTS);
+        const detail = getCurrentReceivedItemsDetail();
+        if (!detail?.rows?.length) {
+            throw new Error('Open a receipt date with detail rows before exporting.');
+        }
+
+        const safeTitle = sanitizeFilenamePart(detail.title);
+        const safeDate = sanitizeFilenamePart(detail.filenameDate);
+        downloadCsv(
+            `${safeTitle}_${safeDate}.csv`,
+            detail.columns,
+            detail.rows
+        );
+        showAppToast('Received items detail exported for Excel.');
+    } catch (error) {
+        handleError(error, 'Failed to export received item details');
+    }
+};
 
 window.previewAuditReport = async () => {
     const button = document.getElementById('previewAuditReportBtn');
@@ -9239,8 +9479,12 @@ window.exportAuditReportCsv = async () => {
 
         const reportStartDate = document.getElementById('reportStartDate').value;
         const reportEndDate = document.getElementById('reportEndDate').value;
-        const safeTitle = currentAuditReport.title.toLowerCase().replace(/[^a-z0-9]+/g, '_');
-        downloadCsv(`${safeTitle}_${reportStartDate}_to_${reportEndDate}.csv`, currentAuditReport.columns, currentAuditReport.rows);
+        const safeTitle = sanitizeFilenamePart(currentAuditReport.title);
+        downloadCsv(
+            `${safeTitle}_${reportStartDate}_to_${reportEndDate}.csv`,
+            currentAuditReport.columns,
+            currentAuditReport.exportRows || currentAuditReport.rows
+        );
         setAuditReportStatus(`CSV exported for ${currentAuditReport.title}.`);
     } catch (error) {
         setAuditReportStatus(error.message || 'Export failed.', true);
