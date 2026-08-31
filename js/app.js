@@ -3740,11 +3740,11 @@ function renderExpenseRows() {
         const lineTotal = getExpenseLineAmount(line);
         return `
             <tr>
-                <td><input type="text" id="expenseDescription${index}" name="expenseDescription${index}" value="${line.description || ''}" placeholder="e.g. Packaging" oninput="updateExpenseLine(${index}, 'description', this.value)"></td>
+                <td><input type="text" id="expenseDescription${index}" name="expenseDescription${index}" value="${escapeHtml(line.description || '')}" placeholder="e.g. Packaging" oninput="updateExpenseLine(${index}, 'description', this.value)"></td>
                 <td><input class="no-spinner" type="number" id="expenseQty${index}" name="expenseQty${index}" min="0" step="1" value="${line.qty || ''}" placeholder="0" oninput="updateExpenseLine(${index}, 'qty', this.value)"></td>
                 <td><input class="no-spinner" type="number" id="expenseUnitCost${index}" name="expenseUnitCost${index}" min="0" step="0.01" value="${line.unitCost || ''}" placeholder="0.00" oninput="updateExpenseLine(${index}, 'unitCost', this.value)"></td>
                 <td style="font-weight:600; text-align:right;">${formatMoney(lineTotal)}</td>
-                <td><input type="text" id="expenseNotes${index}" name="expenseNotes${index}" value="${line.notes || ''}" placeholder="Optional note" oninput="updateExpenseLine(${index}, 'notes', this.value)"></td>
+                <td><input type="text" id="expenseNotes${index}" name="expenseNotes${index}" value="${escapeHtml(line.notes || '')}" placeholder="Optional note" oninput="updateExpenseLine(${index}, 'notes', this.value)"></td>
                 <td style="text-align:right;"><button class="btn" onclick="removeExpenseLine(${index})" ${state.financeDraft.expenseLines.length === 1 ? 'disabled' : ''}>Remove</button></td>
             </tr>
         `;
@@ -3760,10 +3760,10 @@ function renderDebtRows(type) {
     const lines = isPaid ? state.financeDraft.debtPaidLines : state.financeDraft.debtGivenLines;
     body.innerHTML = lines.map((line, index) => `
         <tr>
-            <td><input type="text" id="${type}DebtClient${index}" name="${type}DebtClient${index}" value="${line.clientName || ''}" placeholder="Client name" style="width:100%;" oninput="updateDebtLine('${type}', ${index}, 'clientName', this.value)"></td>
-            <td><input type="text" id="${type}DebtPhone${index}" name="${type}DebtPhone${index}" value="${line.phone || ''}" placeholder="Phone" style="width:100%;" oninput="updateDebtLine('${type}', ${index}, 'phone', this.value)"></td>
+            <td><input type="text" id="${type}DebtClient${index}" name="${type}DebtClient${index}" value="${escapeHtml(line.clientName || '')}" placeholder="Client name" style="width:100%;" oninput="updateDebtLine('${type}', ${index}, 'clientName', this.value)"></td>
+            <td><input type="text" id="${type}DebtPhone${index}" name="${type}DebtPhone${index}" value="${escapeHtml(line.phone || '')}" placeholder="Phone" style="width:100%;" oninput="updateDebtLine('${type}', ${index}, 'phone', this.value)"></td>
             <td><input class="no-spinner" type="number" id="${type}DebtAmount${index}" name="${type}DebtAmount${index}" min="0" step="0.01" value="${line.amount || ''}" placeholder="0.00" style="width:100%;" oninput="updateDebtLine('${type}', ${index}, 'amount', this.value)"></td>
-            <td><input type="text" id="${type}DebtNotes${index}" name="${type}DebtNotes${index}" value="${line.notes || ''}" placeholder="Reason / note" style="width:100%;" oninput="updateDebtLine('${type}', ${index}, 'notes', this.value)"></td>
+            <td><input type="text" id="${type}DebtNotes${index}" name="${type}DebtNotes${index}" value="${escapeHtml(line.notes || '')}" placeholder="Reason / note" style="width:100%;" oninput="updateDebtLine('${type}', ${index}, 'notes', this.value)"></td>
             <td style="text-align:right;"><button class="btn" onclick="removeDebtLine('${type}', ${index})" ${lines.length === 1 ? 'disabled' : ''}>Remove</button></td>
         </tr>
     `).join('');
@@ -4972,6 +4972,77 @@ function getFinanceInputs() {
     };
 }
 
+function isFreshStartShift(shift = state.currentShift) {
+    return String(shift?.reconciliation_notes || '').includes('Fresh-start shift.');
+}
+
+window.setFreshStartOpeningBalances = async () => {
+    try {
+        if (!state.currentShift?.id) {
+            throw new Error('No active shift was found. Refresh and try again.');
+        }
+        if (!hasPermission(state.permissions, PERMISSIONS.RECORD_FINANCE)) {
+            throw new Error('You do not have permission to set opening balances.');
+        }
+        if (!isFreshStartShift()) {
+            throw new Error('Opening balances can only be set on a fresh-start shift. Ordinary shifts carry balances forward automatically.');
+        }
+
+        const cashValue = await openPromptModal({
+            title: 'Set Opening Cash',
+            label: 'Physical cash available at the start of this shift (KES)',
+            initialValue: String(toNumber(state.currentShift.cash_at_hand)),
+            inputType: 'number',
+            inputStep: '0.01',
+            placeholder: '0.00',
+            confirmText: 'Next'
+        });
+        if (cashValue === null) return;
+
+        const cashOpening = Number(cashValue);
+        if (!Number.isFinite(cashOpening) || cashOpening < 0) {
+            throw new Error('Opening cash must be a valid amount of zero or more.');
+        }
+
+        const mpesaValue = await openPromptModal({
+            title: 'Set M-Pesa Opening',
+            label: 'M-Pesa float at the start of this shift (KES)',
+            initialValue: String(toNumber(state.currentShift.mpesa_float)),
+            inputType: 'number',
+            inputStep: '0.01',
+            placeholder: '0.00',
+            confirmText: 'Save Opening Balances'
+        });
+        if (mpesaValue === null) return;
+
+        const mpesaOpening = Number(mpesaValue);
+        if (!Number.isFinite(mpesaOpening) || mpesaOpening < 0) {
+            throw new Error('M-Pesa opening must be a valid amount of zero or more.');
+        }
+
+        const { data, error } = await repositories.updateShift(state.currentShift.id, {
+            cash_at_hand: cashOpening,
+            mpesa_float: mpesaOpening
+        });
+        if (error) throw error;
+
+        state.currentShift = {
+            ...state.currentShift,
+            ...data
+        };
+        state.financeDraft.mpesaOpening = String(mpesaOpening);
+
+        const cashOpeningInput = document.getElementById('cashOpening');
+        const mpesaOpeningInput = document.getElementById('mpesaOpening');
+        if (cashOpeningInput) cashOpeningInput.value = cashOpening;
+        if (mpesaOpeningInput) mpesaOpeningInput.value = mpesaOpening;
+        window.calcRecon();
+        showAppToast('Fresh-start opening balances saved.');
+    } catch (error) {
+        handleError(error, 'Failed to set opening balances');
+    }
+};
+
 function collectClosingRows() {
     if (isDirectSalesMode()) {
         const visibleRows = Array.from(document.querySelectorAll('#salesBody .sales-input')).map((input) => {
@@ -5136,6 +5207,8 @@ function resetFinanceFieldsForShift() {
         debtGivenLines: [createDebtDraft()],
         debtPaidLines: [createDebtDraft()]
     };
+    const cashOpeningInput = document.getElementById('cashOpening');
+    if (cashOpeningInput) cashOpeningInput.value = toNumber(state.currentShift?.cash_at_hand);
     document.getElementById('mpesaOpening').value = carry.mpesaBf;
     document.getElementById('mpesaClosing').value = '';
     document.getElementById('mpesaWithdraw').value = '';
@@ -5169,12 +5242,14 @@ function applyNextShiftFinanceReset(carryOverride = null) {
     primeNextShiftDraftState(carry);
 
     const mpesaOpeningInput = document.getElementById('mpesaOpening');
+    const cashOpeningInput = document.getElementById('cashOpening');
     const mpesaClosingInput = document.getElementById('mpesaClosing');
     const mpesaWithdrawInput = document.getElementById('mpesaWithdraw');
     const cashAtHandInput = document.getElementById('cashAtHand');
     const financeNotesInput = document.getElementById('financeNotes');
 
     if (mpesaOpeningInput) mpesaOpeningInput.value = carry.mpesaBf || '';
+    if (cashOpeningInput) cashOpeningInput.value = toNumber(state.currentShift?.cash_at_hand);
     if (mpesaClosingInput) mpesaClosingInput.value = '';
     if (mpesaWithdrawInput) mpesaWithdrawInput.value = '';
     if (cashAtHandInput) cashAtHandInput.value = '';
