@@ -297,10 +297,18 @@ function validateDirectSalesCloseInput({ currentShift, inventoryRows, finance })
         }
     });
 
-    if (toNumber(finance?.mpesaOpening) < 0) errors.push('M-Pesa opening balance is required.');
-    if (toNumber(finance?.mpesaClosing) < 0) errors.push('M-Pesa closing balance is required.');
-    if (toNumber(finance?.cashAtHand) < 0) errors.push('Cash at hand is required.');
-    if (toNumber(finance?.totalSales) < 0) errors.push('Total sales must be available before closing.');
+    if (finance?.mpesaOpening === null || finance?.mpesaOpening === undefined || toNumber(finance.mpesaOpening) < 0) {
+        errors.push('M-Pesa opening balance is required.');
+    }
+    if (finance?.mpesaClosing === null || finance?.mpesaClosing === undefined || toNumber(finance.mpesaClosing) < 0) {
+        errors.push('M-Pesa closing balance is required.');
+    }
+    if (finance?.cashAtHand === null || finance?.cashAtHand === undefined || toNumber(finance.cashAtHand) < 0) {
+        errors.push('Cash at hand is required.');
+    }
+    if (finance?.totalSales === null || finance?.totalSales === undefined || toNumber(finance.totalSales) < 0) {
+        errors.push('Total sales must be available before closing.');
+    }
 
     return errors;
 }

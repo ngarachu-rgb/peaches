@@ -1328,6 +1328,23 @@ export function createRepositories(supabase) {
             ]);
         },
 
+        updateRawMaterialWithUnitConversion(context, id, payload, reason, changedBy) {
+            return supabase.rpc('update_main_store_units_with_stock_conversion', {
+                p_material_id: id,
+                p_restaurant_id: context.restaurantId,
+                p_branch_id: context.branchId,
+                p_name: payload.name,
+                p_buy_unit: payload.buyUnit,
+                p_store_unit: payload.storeUnit,
+                p_conversion_factor: payload.conversionFactor,
+                p_price: payload.price,
+                p_reorder_level: payload.reorderLevel,
+                p_is_key_shift_item: payload.isKeyShiftItem,
+                p_reason: reason,
+                p_changed_by: changedBy
+            });
+        },
+
         deleteRawMaterial(context, id) {
             return applyScope(
                 supabase.from('main_store').delete().eq('id', id),

@@ -63,6 +63,23 @@ These are assumptions to make the structure operational.
 
 You can rename them later if you prefer a different bottle naming pattern.
 
+## Unit Change Safeguard
+
+- Stock balances are stored in the configured `store_unit`.
+- Changing a store unit for an existing item must be done from the individual
+  Raw Item edit form, not by CSV import.
+- The app previews the converted balance and requires a reason before saving.
+- Supabase converts the balance and unit metadata in one transaction and writes
+  an immutable row to `stock_unit_conversions`.
+- Example: changing `Bottle -> ML` with factor `250` to `Bottle -> Bottle`
+  with factor `1` converts `1500 ML` to `6 Bottles`.
+- When buying unit and store unit are the same, the conversion factor must be `1`.
+
+Install the database safeguard before using unit edits by running:
+
+- `sql/main_store_unit_conversion.sql`
+- then `sql/main_store_unit_conversion_validation.sql`
+
 ## Price Handling
 
 - raw-material CSV keeps `price = 0` for now

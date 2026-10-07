@@ -5,6 +5,66 @@ function toNumber(value) {
     return Number.isFinite(normalized) ? normalized : 0;
 }
 
+function normalizeUnit(value) {
+    return String(value || '').trim().toLowerCase();
+}
+
+export function buildStockUnitConversionPlan({
+    currentStock = 0,
+    oldBuyUnit = '',
+    oldStoreUnit = '',
+    oldConversionFactor = 1,
+    newBuyUnit = '',
+    newStoreUnit = '',
+    newConversionFactor = 1
+}) {
+    const normalizedOldBuyUnit = normalizeUnit(oldBuyUnit);
+    const normalizedOldStoreUnit = normalizeUnit(oldStoreUnit);
+    const normalizedNewBuyUnit = normalizeUnit(newBuyUnit);
+    const normalizedNewStoreUnit = normalizeUnit(newStoreUnit);
+    const oldFactor = toNumber(oldConversionFactor);
+    const newFactor = toNumber(newConversionFactor);
+    const stock = toNumber(currentStock);
+
+    if (!normalizedNewBuyUnit) throw new Error('Buying unit is required.');
+    if (!normalizedNewStoreUnit) throw new Error('Store unit is required.');
+    if (oldFactor <= 0 || newFactor <= 0) throw new Error('Conversion factor must be greater than zero.');
+    if (normalizedNewBuyUnit === normalizedNewStoreUnit && newFactor !== 1) {
+        throw new Error('Conversion factor must be 1 when buying unit and store unit are the same.');
+    }
+
+    const buyUnitChanged = normalizedOldBuyUnit !== normalizedNewBuyUnit;
+    const storeUnitChanged = normalizedOldStoreUnit !== normalizedNewStoreUnit;
+    const conversionFactorChanged = oldFactor !== newFactor;
+    const settingsChanged = buyUnitChanged || storeUnitChanged || conversionFactorChanged;
+
+    if (storeUnitChanged && buyUnitChanged && stock !== 0) {
+        throw new Error(
+            'Buying unit and store unit cannot both be changed while stock is non-zero. ' +
+            'Set or reconcile the physical balance first.'
+        );
+    }
+
+    const convertedStock = storeUnitChanged
+        ? (stock / oldFactor) * newFactor
+        : stock;
+
+    if (!Number.isFinite(convertedStock) || convertedStock < 0) {
+        throw new Error('The converted stock balance is invalid.');
+    }
+
+    return {
+        settingsChanged,
+        buyUnitChanged,
+        storeUnitChanged,
+        conversionFactorChanged,
+        currentStock: stock,
+        convertedStock,
+        oldFactor,
+        newFactor
+    };
+}
+
 function toDateOnly(value = new Date()) {
     const date = value instanceof Date ? value : new Date(value);
     return date.toISOString().split('T')[0];

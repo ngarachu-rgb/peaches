@@ -6,10 +6,11 @@ import {
     calculateMpesaIncome,
     calculateSoldQty,
     calculateVariance,
+    buildStockUnitConversionPlan,
     getCarryForwardBalances
-} from './calculations.js';
+} from './calculations.js?v=20261007-stock-unit-conversion-1';
 import { PAGE_PERMISSIONS, PERMISSIONS, ROLES, canSwitchBranches, hasPageAccess, hasPermission } from './permissions.js';
-import { createRepositories } from './repositories.js';
+import { createRepositories } from './repositories.js?v=20261007-stock-unit-conversion-1';
 import { adjustReverseDispatch, closeShiftWithCarryForward, ensureActiveShift, recordReverseDispatch } from './shift-service.js';
 import { issueSupplyStock, recordSupplyReceipt, transferSupplyStock } from './supply-store-service.js';
 import { transferRawMaterial } from './transfer-service.js';
@@ -588,7 +589,7 @@ function openPromptModal({
         body.innerHTML = `
             <div style="display:grid; gap:14px;">
                 <label for="${inputId}" style="font-size:13px; color:#475569; font-weight:600;">${label}</label>
-                <input id="${inputId}" type="${inputType}" step="${inputStep}" value="${escapeHtml(initialValue)}" placeholder="${escapeHtml(placeholder)}" style="padding:12px; border:1px solid #cbd5e1; border-radius:10px;">
+                <input id="${inputId}" name="${inputId}" type="${inputType}" step="${inputStep}" value="${escapeHtml(initialValue)}" placeholder="${escapeHtml(placeholder)}" style="padding:12px; border:1px solid #cbd5e1; border-radius:10px;">
                 <div style="display:flex; justify-content:flex-end; gap:10px;">
                     <button type="button" class="btn" id="appModalCancelBtn" style="background:#e2e8f0; color:#334155;">Cancel</button>
                     <button type="button" class="btn btn-success" id="appModalConfirmBtn">${confirmText}</button>
@@ -4956,11 +4957,13 @@ function renderStockReceiptBatchInputs() {
 function getFinanceInputs() {
     const carry = getCarryForwardBalances(state.currentShift);
     const totals = calculateFinanceLineTotals();
+    const rawMpesaClosing = document.getElementById('mpesaClosing')?.value;
+    const rawCashAtHand = document.getElementById('cashAtHand')?.value;
     return {
         mpesaOpening: toNumber(document.getElementById('mpesaOpening').value || state.financeDraft.mpesaOpening || carry.mpesaBf),
-        mpesaClosing: toNumber(document.getElementById('mpesaClosing').value || state.financeDraft.mpesaClosing),
+        mpesaClosing: rawMpesaClosing === '' || rawMpesaClosing === undefined ? null : toNumber(rawMpesaClosing),
         mpesaWithdraw: toNumber(document.getElementById('mpesaWithdraw').value || state.financeDraft.mpesaWithdraw),
-        cashAtHand: toNumber(document.getElementById('cashAtHand').value || state.financeDraft.cashAtHand),
+        cashAtHand: rawCashAtHand === '' || rawCashAtHand === undefined ? null : toNumber(rawCashAtHand),
         notes: String(document.getElementById('financeNotes')?.value || state.financeDraft.notes || '').trim(),
         totalExpenses: totals.totalExpenses,
         debtGiven: totals.totalDebtGiven,
@@ -7576,21 +7579,81 @@ window.saveRawMaterial = async () => {
         const name = composeMaterialName(code, rawName);
         const buyUnit = document.getElementById('buyUnit').value.trim();
         const storeUnit = document.getElementById('storeUnit').value.trim();
-        const conversionFactor = Math.max(toNumber(document.getElementById('convFactor').value), 1);
+        const conversionFactor = Number(document.getElementById('convFactor').value);
         const price = toNumber(document.getElementById('buyPrice').value);
         const reorderLevel = Math.max(toNumber(document.getElementById('reorderLevel').value), 0);
         const isKeyShiftItem = document.getElementById('rawIsKeyShiftItem').checked;
-        if (!rawName || price <= 0) throw new Error('Please enter a Material Name and Price.');
+        if (!rawName || !buyUnit || !storeUnit || price <= 0) {
+            throw new Error('Material name, buying unit, store unit, and a valid price are required.');
+        }
+        if (!Number.isFinite(conversionFactor) || conversionFactor <= 0) {
+            throw new Error('Conversion factor must be greater than zero.');
+        }
 
-        const { error } = await repositories.saveRawMaterial(
-            getScope(),
-            { name, buyUnit, storeUnit, conversionFactor, price, reorderLevel, isKeyShiftItem },
-            id
-        );
-        if (error) throw error;
+        const originalMaterial = id
+            ? (state.rawMaterials || []).find((entry) => String(entry.id) === String(id))
+            : null;
+        if (id && !originalMaterial) throw new Error('The material being edited could not be found. Refresh and try again.');
+
+        const conversionPlan = buildStockUnitConversionPlan({
+            currentStock: originalMaterial?.stock_level ?? originalMaterial?.current_stock ?? 0,
+            oldBuyUnit: originalMaterial?.buy_unit || buyUnit,
+            oldStoreUnit: originalMaterial?.store_unit || storeUnit,
+            oldConversionFactor: originalMaterial?.conversion_factor || conversionFactor,
+            newBuyUnit: buyUnit,
+            newStoreUnit: storeUnit,
+            newConversionFactor: conversionFactor
+        });
+
+        const payload = { name, buyUnit, storeUnit, conversionFactor, price, reorderLevel, isKeyShiftItem };
+        let result;
+
+        if (id && conversionPlan.settingsChanged) {
+            const conversionSummary = conversionPlan.storeUnitChanged
+                ? `Stock will convert from ${formatQuantity(conversionPlan.currentStock)} ${originalMaterial.store_unit} ` +
+                    `to ${formatQuantity(conversionPlan.convertedStock)} ${storeUnit}.`
+                : `The stock unit remains ${storeUnit}, so the balance will remain ${formatQuantity(conversionPlan.currentStock)} ${storeUnit}.`;
+
+            if (!confirm(
+                `Change unit settings for ${getDisplayMaterialName(originalMaterial.name)}?\n\n` +
+                `${conversionSummary}\n\n` +
+                `Old conversion: 1 ${originalMaterial.buy_unit} = ${formatQuantity(originalMaterial.conversion_factor)} ${originalMaterial.store_unit}\n` +
+                `New conversion: 1 ${buyUnit} = ${formatQuantity(conversionFactor)} ${storeUnit}`
+            )) {
+                return;
+            }
+
+            const reasonResponse = await openPromptModal({
+                title: 'Reason For Unit Change',
+                label: 'Enter why the unit or conversion is being changed. This will be kept in the stock audit history.',
+                inputType: 'text',
+                placeholder: 'Example: Standardized 250ML bottles to Bottle units',
+                confirmText: 'Convert And Save'
+            });
+            if (reasonResponse === null) return;
+
+            const reason = String(reasonResponse || '').trim();
+            if (!reason) throw new Error('A reason is required when changing unit settings.');
+
+            result = await repositories.updateRawMaterialWithUnitConversion(
+                getScope(),
+                id,
+                payload,
+                reason,
+                getProfileDisplayName(state.user)
+            );
+
+            if (result.error && /update_main_store_units_with_stock_conversion|schema cache|function/i.test(result.error.message || '')) {
+                throw new Error('The stock unit-conversion database safeguard is not installed. Run sql/main_store_unit_conversion.sql in Supabase, then try again.');
+            }
+        } else {
+            result = await repositories.saveRawMaterial(getScope(), payload, id);
+        }
+
+        if (result.error) throw result.error;
 
         clearReferenceDataCaches();
-        showAppToast(id ? 'Material Updated!' : 'Material Added!');
+        showAppToast(id && conversionPlan.settingsChanged ? 'Material units and stock balance converted.' : (id ? 'Material Updated!' : 'Material Added!'));
         window.resetRawForm();
         await loadRawMaterials();
         updateDropdowns();
@@ -7626,6 +7689,31 @@ window.importRawMaterialCsv = async () => {
         if (!rawImportRows.length) {
             rawImportRows = await readRawImportRows();
             renderRawImportPreview(rawImportRows);
+        }
+
+        const existingByName = new Map(
+            (state.rawMaterials || []).map((material) => [String(material.name || '').trim().toLowerCase(), material])
+        );
+        const unitChangeRows = [];
+        rawImportRows.forEach((row) => {
+            const existing = existingByName.get(String(row.name || '').trim().toLowerCase());
+            const plan = buildStockUnitConversionPlan({
+                currentStock: existing?.stock_level ?? existing?.current_stock ?? 0,
+                oldBuyUnit: existing?.buy_unit || row.buy_unit,
+                oldStoreUnit: existing?.store_unit || row.store_unit,
+                oldConversionFactor: existing?.conversion_factor || row.conversion_factor,
+                newBuyUnit: row.buy_unit,
+                newStoreUnit: row.store_unit,
+                newConversionFactor: row.conversion_factor
+            });
+            if (existing?.id && plan.settingsChanged) unitChangeRows.push(getDisplayMaterialName(existing.name));
+        });
+
+        if (unitChangeRows.length) {
+            throw new Error(
+                `CSV import cannot change unit settings for existing stock items: ${unitChangeRows.join(', ')}. ` +
+                'Edit these items individually so the balance conversion is previewed, confirmed, and audited.'
+            );
         }
 
         const { error } = await repositories.importRawMaterials(getScope(), rawImportRows, state.rawMaterials);
@@ -9726,11 +9814,5 @@ window.updateItemField = (id, field, value) => {
 };
 
 document.getElementById('postBtn')?.addEventListener('click', window.processReverseDispatch);
-
-
-
-
-
-
 
 
